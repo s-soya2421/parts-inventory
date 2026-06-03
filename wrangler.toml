@@ -11,4 +11,4 @@ not_found_handling = "single-page-application"
 [[d1_databases]]
 binding = "DB"
 database_name = "db-parts"
-database_id = "d60b99ec-c57d-40a4-9646-4eq5d6958e23"
+database_id = "d60b99ec-c57d-40a4-9646-4eq59d6958e23"
