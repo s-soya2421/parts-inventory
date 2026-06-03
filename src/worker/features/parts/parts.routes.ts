@@ -21,23 +21,10 @@ const filtersSchema = z.object({
   statusId: z.coerce.number().int().positive().optional(),
   archived: z.enum(["active", "archived", "all"]).default("active"),
   stockStatus: z.enum(["all", "in_stock", "out_of_stock", "low_stock"]).default("all"),
-  sort: z
-    .enum([
-      "modelNumber",
-      "manufacturer",
-      "categoryName",
-      "status",
-      "stockQuantity",
-      "location",
-      "price",
-      "footprint",
-      "lowStockThreshold",
-      "createdAt",
-      "updatedAt",
-      "name",
-      "category",
-    ])
-    .optional(),
+  // 既知の列に加え、カテゴリ属性（電気的特性・仕様）の列 attr_<key> もソート対象になる。
+  // 値はリポジトリ側のホワイトリスト(buildOrderBy)で解決し、未知キーは既定順にフォールバックするため、
+  // ここでは任意の文字列を許容する（厳格な enum だと attr_xxx が弾かれてソート時にエラーになる）。
+  sort: z.string().trim().min(1).optional(),
   direction: z.enum(["asc", "desc"]).default("desc"),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(200).default(50),
