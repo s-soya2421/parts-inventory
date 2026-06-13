@@ -6,6 +6,7 @@ const navItems = [
   { to: "/parts", label: "在庫一覧" },
   { to: "/find", label: "カテゴリ一覧/電気的特性" },
   { to: "/analytics", label: "統計・分析" },
+  { to: "/projects", label: "プロジェクト" },
   { to: "/parts/new", label: "新規作成" },
   { to: "/parts?stockStatus=low_stock", label: "低在庫アラート" },
   { to: "/settings", label: "設定" },
