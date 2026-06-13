@@ -13,6 +13,10 @@ describe("primary pages smoke", () => {
     expect(app).toContain('path="/parts/new"');
     expect(app).toContain('path="/parts/:id"');
     expect(app).toContain('path="/parts/:id/edit"');
+    expect(app).toContain('path="/projects"');
+    expect(app).toContain('path="/projects/new"');
+    expect(app).toContain('path="/projects/:id"');
+    expect(app).toContain('path="/projects/:id/edit"');
     expect(app).toContain('path="/find"');
     expect(app).toContain('path="/categories"');
     expect(app).toContain('path="/categories/:id/settings"');
@@ -26,6 +30,7 @@ describe("primary pages smoke", () => {
     expect(read("src/web/routes/FindPage.tsx")).toContain("部品を探す");
     expect(read("src/web/routes/CategorySettingsPage.tsx")).toContain("カテゴリ設定");
     expect(read("src/web/routes/PartCreatePage.tsx")).toContain("部品登録");
+    expect(read("src/web/routes/ProjectCreatePage.tsx")).toContain("プロジェクト登録");
     expect(read("src/web/routes/ImportPage.tsx")).toContain("JSONインポート");
     expect(read("src/web/routes/ExportPage.tsx")).toContain("エクスポート");
     expect(read("src/web/routes/SettingsPage.tsx")).toContain("管理");

@@ -1,4 +1,4 @@
-import type { AttributeDefinition, Category, CategoryListHeader, Location, PartDetail, PartsAnalytics, PartStatus, PartSummary, PartWriteInput, Tag } from "@shared/types";
+import type { AttributeDefinition, Category, CategoryListHeader, Location, PartDetail, PartsAnalytics, PartStatus, PartSummary, PartWriteInput, ProjectDetail, ProjectSummary, ProjectWriteInput, Tag } from "@shared/types";
 
 type ApiEnvelope<T> = { data: T };
 type ApiErrorBody = { error?: { message?: string; issues?: unknown } };
@@ -257,6 +257,21 @@ export const apiClient = {
   },
   deleteTag(id: number) {
     return request<{ ok: true }>(`/api/tags/${id}`, { method: "DELETE" });
+  },
+  listProjects() {
+    return request<ProjectSummary[]>("/api/projects");
+  },
+  getProject(id: number) {
+    return request<ProjectDetail>(`/api/projects/${id}`);
+  },
+  createProject(input: ProjectWriteInput) {
+    return request<ProjectDetail>("/api/projects", { method: "POST", body: JSON.stringify(input) });
+  },
+  updateProject(id: number, input: ProjectWriteInput) {
+    return request<ProjectDetail>(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify(input) });
+  },
+  deleteProject(id: number) {
+    return request<{ ok: true }>(`/api/projects/${id}`, { method: "DELETE" });
   },
   listStatuses() {
     return request<PartStatus[]>("/api/statuses");
