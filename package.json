@@ -17,8 +17,8 @@
     "test:web": "vitest run tests/web --pool=vmThreads --maxWorkers=1",
     "verify:cloudflare-secrets": "node ./scripts/verify-cloudflare-secrets.js",
     "deploy": "pnpm build && pnpm db:migrate:remote && wrangler deploy",
-    "db:migrate:local": "wrangler d1 migrations apply electronics_inventory --local",
-    "db:migrate:remote": "wrangler d1 migrations apply electronics_inventory --remote"
+    "db:migrate:local": "wrangler d1 migrations apply parts-inventory --local",
+    "db:migrate:remote": "wrangler d1 migrations apply parts-inventory --remote"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.2",
