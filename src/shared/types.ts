@@ -194,6 +194,74 @@ export type Location = {
   updatedAt: string;
 };
 
+export type ProjectPartLine = {
+  id: number;
+  partId: number;
+  quantityRequired: number;
+  memo?: string | null;
+  modelNumber: string;
+  name: string;
+  price?: number | null;
+  categoryName?: string | null;
+  lineTotal: number;
+};
+
+export type ProjectCost = {
+  id: number;
+  name: string;
+  amount: number;
+  memo?: string | null;
+  sortOrder: number;
+};
+
+export type ProjectTotals = {
+  partsCost: number;
+  costsTotal: number;
+  total: number;
+  unpricedCount: number;
+};
+
+export type ProjectSummary = {
+  id: number;
+  name: string;
+  description?: string | null;
+  imageUrl?: string | null;
+  referenceUrl?: string | null;
+  partsCount: number;
+  costsCount: number;
+  total: number;
+  unpricedCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectDetail = ProjectSummary & {
+  parts: ProjectPartLine[];
+  costs: ProjectCost[];
+  totals: ProjectTotals;
+};
+
+export type ProjectPartInput = {
+  partId: number;
+  quantityRequired: number;
+  memo?: string | null;
+};
+
+export type ProjectCostInput = {
+  name: string;
+  amount: number;
+  memo?: string | null;
+};
+
+export type ProjectWriteInput = {
+  name: string;
+  description?: string | null;
+  imageUrl?: string | null;
+  referenceUrl?: string | null;
+  parts?: ProjectPartInput[];
+  costs?: ProjectCostInput[];
+};
+
 export type ApiErrorBody = {
   error: {
     code: string;

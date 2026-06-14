@@ -1,4 +1,4 @@
-import type { AttributeDefinition, Category, CategoryListHeader, Location, PartAttribute, PartAttributeValue, PartStatus, PartSummary, StockMovement, Tag } from "@shared/types";
+import type { AttributeDefinition, Category, CategoryListHeader, Location, PartAttribute, PartAttributeValue, PartStatus, PartSummary, ProjectCost, ProjectPartLine, ProjectSummary, StockMovement, Tag } from "@shared/types";
 import type {
   DbAttributeDefinitionRow,
   DbCategoryRow,
@@ -8,6 +8,9 @@ import type {
   DbPartAttributeValueRow,
   DbPartRow,
   DbPartStatusRow,
+  DbProjectCostRow,
+  DbProjectPartRow,
+  DbProjectRow,
   DbStockMovementRow,
   DbTagRow,
 } from "./types";
@@ -235,5 +238,48 @@ export function mapPart(row: DbPartRow, attributes: PartAttribute[], tags: Tag[]
     attributes,
     attributeValues,
     tags,
+  };
+}
+
+export function mapProjectSummary(row: DbProjectRow): ProjectSummary {
+  const partsCost = row.parts_cost ?? 0;
+  const costsTotal = row.costs_total ?? 0;
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    imageUrl: row.image_url,
+    referenceUrl: row.reference_url,
+    partsCount: row.parts_count ?? 0,
+    costsCount: row.costs_count ?? 0,
+    total: partsCost + costsTotal,
+    unpricedCount: row.unpriced_count ?? 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapProjectPartLine(row: DbProjectPartRow): ProjectPartLine {
+  const price = row.price;
+  return {
+    id: row.id,
+    partId: row.part_id,
+    quantityRequired: row.quantity_required,
+    memo: row.memo,
+    modelNumber: row.model_number,
+    name: row.part_name,
+    price: price,
+    categoryName: row.category_name,
+    lineTotal: row.quantity_required * (price ?? 0),
+  };
+}
+
+export function mapProjectCost(row: DbProjectCostRow): ProjectCost {
+  return {
+    id: row.id,
+    name: row.name,
+    amount: row.amount,
+    memo: row.memo,
+    sortOrder: row.sort_order,
   };
 }

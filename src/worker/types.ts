@@ -150,3 +150,39 @@ export type DbStockMovementRow = {
   memo: string | null;
   created_at: string;
 };
+
+export type DbProjectRow = {
+  id: number;
+  name: string;
+  description: string | null;
+  image_url: string | null;
+  reference_url: string | null;
+  created_at: string;
+  updated_at: string;
+  parts_count?: number;
+  costs_count?: number;
+  parts_cost?: number;
+  costs_total?: number;
+  unpriced_count?: number;
+};
+
+export type DbProjectPartRow = {
+  id: number;
+  project_id: number;
+  part_id: number;
+  quantity_required: number;
+  memo: string | null;
+  model_number: string;
+  part_name: string;
+  price: number | null;
+  category_name: string | null;
+};
+
+export type DbProjectCostRow = {
+  id: number;
+  project_id: number;
+  name: string;
+  amount: number;
+  memo: string | null;
+  sort_order: number;
+};
