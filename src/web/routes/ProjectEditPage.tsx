@@ -20,12 +20,23 @@ export function ProjectEditPage() {
     Promise.all([
       apiClient.getProject(id),
       apiClient.listParts(
-        new URLSearchParams({ pageSize: "200", archived: "all" }),
+        new URLSearchParams({
+          pageSize: "30",
+          archived: "active",
+          sort: "updatedAt",
+          direction: "desc",
+        }),
       ),
     ])
-      .then(([projectData, partsResponse]) => {
+      .then(async ([projectData, partsResponse]) => {
+        const loadedIds = new Set(partsResponse.items.map((part) => part.id));
+        const missingParts = await Promise.all(
+          projectData.parts
+            .filter((part) => !loadedIds.has(part.partId))
+            .map((part) => apiClient.getPart(part.partId)),
+        );
         setProject(projectData);
-        setParts(partsResponse.items);
+        setParts([...partsResponse.items, ...missingParts]);
       })
       .catch((err) =>
         setError(

@@ -13,7 +13,14 @@ export function ProjectCreatePage() {
 
   useEffect(() => {
     apiClient
-      .listParts(new URLSearchParams({ pageSize: "200", archived: "all" }))
+      .listParts(
+        new URLSearchParams({
+          pageSize: "30",
+          archived: "active",
+          sort: "updatedAt",
+          direction: "desc",
+        }),
+      )
       .then(({ items }) => setParts(items))
       .catch((err) =>
         setError(

@@ -3,7 +3,7 @@ import { getDb } from "../../db/client";
 import type { Env } from "../../types";
 import { ProjectsRepository } from "./projects.repository";
 import { ProjectsService } from "./projects.service";
-import { projectWriteSchema } from "./projects.schemas";
+import { projectPartInputSchema, projectWriteSchema } from "./projects.schemas";
 
 export const projectsRoutes = new Hono<Env>();
 
@@ -13,7 +13,9 @@ function createService(db: D1Database): ProjectsService {
 
 projectsRoutes.get("/", async (c) => {
   const service = createService(getDb(c.env));
-  return c.json({ data: await service.list() });
+  const rawPartId = c.req.query("partId");
+  const partId = rawPartId ? Number(rawPartId) : undefined;
+  return c.json({ data: await service.list(partId) });
 });
 
 projectsRoutes.post("/", async (c) => {
@@ -33,6 +35,13 @@ projectsRoutes.put("/:id", async (c) => {
   const input = projectWriteSchema.parse(await c.req.json());
   const service = createService(getDb(c.env));
   return c.json({ data: await service.update(id, input) });
+});
+
+projectsRoutes.post("/:id/parts", async (c) => {
+  const id = Number(c.req.param("id"));
+  const input = projectPartInputSchema.parse(await c.req.json());
+  const service = createService(getDb(c.env));
+  return c.json({ data: await service.addPart(id, input) });
 });
 
 projectsRoutes.delete("/:id", async (c) => {

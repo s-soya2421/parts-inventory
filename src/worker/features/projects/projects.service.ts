@@ -9,8 +9,8 @@ import {
 export class ProjectsService {
   constructor(private readonly repository: ProjectsRepository) {}
 
-  async list(): Promise<ProjectSummary[]> {
-    return this.repository.list();
+  async list(partId?: number): Promise<ProjectSummary[]> {
+    return this.repository.list(partId);
   }
 
   async getDetail(id: number): Promise<ProjectDetail> {
@@ -91,6 +91,16 @@ export class ProjectsService {
 
   async delete(id: number): Promise<void> {
     return this.repository.delete(id);
+  }
+
+  async addPart(id: number, input: ProjectPartInput): Promise<ProjectDetail> {
+    const project = await this.repository.findRowById(id);
+    if (!project)
+      throw new AppError("PROJECT_NOT_FOUND", "Project not found.", 404);
+    const [part] = this.dedupeParts([input]);
+    await this.validateParts([part]);
+    await this.repository.addPart(id, part);
+    return this.getDetail(id);
   }
 
   private dedupeParts(parts: ProjectPartInput[]): ProjectPartPersist[] {

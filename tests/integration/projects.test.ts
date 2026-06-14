@@ -197,6 +197,35 @@ describe("projects CRUD", () => {
     expect(typeof item.total).toBe("number");
   });
 
+  it("links a part from the part detail workflow and filters related projects", async () => {
+    const categoryId = await createCategory("RelatedProjectCat");
+    const partId = await createPart({
+      categoryId,
+      modelNumber: "RELATED-A",
+      name: "Related Part",
+      stockQuantity: 10,
+      price: 25,
+    });
+    const created = await client.request("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ name: "Related Project" }),
+    });
+    const projectId = created.body.data.id;
+
+    const linked = await client.request(`/api/projects/${projectId}/parts`, {
+      method: "POST",
+      body: JSON.stringify({ partId, quantityRequired: 4, memo: "main board" }),
+    });
+    expect(linked.response.status).toBe(200);
+    expect(linked.body.data.parts[0].partId).toBe(partId);
+    expect(linked.body.data.parts[0].quantityRequired).toBe(4);
+    expect(linked.body.data.totals.partsCost).toBe(100);
+
+    const related = await client.request(`/api/projects?partId=${partId}`);
+    expect(related.response.status).toBe(200);
+    expect(related.body.data.map((project: { id: number }) => project.id)).toContain(projectId);
+  });
+
   it("returns 404 for a missing project", async () => {
     const get = await client.request("/api/projects/999999");
     expect(get.response.status).toBe(404);
