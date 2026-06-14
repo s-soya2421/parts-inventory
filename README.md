@@ -158,6 +158,11 @@ pnpm wrangler deploy
 - `POST /api/statuses`
 - `PUT /api/statuses/:id`
 - `DELETE /api/statuses/:id`
+- `GET /api/projects`
+- `GET /api/projects/:id`
+- `POST /api/projects`
+- `PUT /api/projects/:id`
+- `DELETE /api/projects/:id`
 - `POST /api/import/parts` （既存はスキップ/更新を選択可。取り込みはバッチ記録され取り消し可能）
 - `GET /api/import/batches` （取り込み履歴：7日以内は取り消し可）
 - `POST /api/import/batches/:id/revert` （取り込みの取り消し：新規分は削除、更新分は取り込み前へ復元）
@@ -170,6 +175,7 @@ pnpm wrangler deploy
 - 部品一覧、詳細、登録、編集
 - 在庫数変更と履歴保存
 - カテゴリ管理、タグ管理
+- プロジェクト管理（使用部品・費用の登録、原価集計）
 - JSON インポート
 - JSON flat/raw エクスポート
 - `.xlsx` エクスポート
