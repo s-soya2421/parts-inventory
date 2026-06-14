@@ -38,7 +38,7 @@ export interface ProjectCostPersist {
 export class ProjectsRepository {
   constructor(private readonly db: D1Database) {}
 
-  async list(): Promise<ProjectSummary[]> {
+  async list(partId?: number): Promise<ProjectSummary[]> {
     const { results } = await this.db
       .prepare(
         `SELECT
@@ -52,8 +52,10 @@ export class ProjectsRepository {
           (SELECT COUNT(*) FROM project_parts pp JOIN parts pt ON pt.id = pp.part_id
            WHERE pp.project_id = p.id AND pt.price IS NULL) AS unpriced_count
         FROM projects p
+        ${partId ? "WHERE EXISTS (SELECT 1 FROM project_parts linked WHERE linked.project_id = p.id AND linked.part_id = ?)" : ""}
         ORDER BY p.updated_at DESC, p.id DESC`,
       )
+      .bind(...(partId ? [partId] : []))
       .all<DbProjectRow>();
     return results.map(mapProjectSummary);
   }
@@ -102,6 +104,36 @@ export class ProjectsRepository {
       .bind(...ids)
       .all<{ id: number }>();
     return new Set(results.map((row) => row.id));
+  }
+
+  async addPart(projectId: number, part: ProjectPartPersist): Promise<void> {
+    const existing = await this.db
+      .prepare(
+        "SELECT id FROM project_parts WHERE project_id = ? AND part_id = ? LIMIT 1",
+      )
+      .bind(projectId, part.partId)
+      .first<{ id: number }>();
+
+    if (existing) {
+      await this.db
+        .prepare(
+          "UPDATE project_parts SET quantity_required = ?, memo = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(part.quantityRequired, part.memo, existing.id)
+        .run();
+    } else {
+      await this.db
+        .prepare(
+          "INSERT INTO project_parts (project_id, part_id, quantity_required, memo) VALUES (?,?,?,?)",
+        )
+        .bind(projectId, part.partId, part.quantityRequired, part.memo)
+        .run();
+    }
+
+    await this.db
+      .prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?")
+      .bind(projectId)
+      .run();
   }
 
   async create(

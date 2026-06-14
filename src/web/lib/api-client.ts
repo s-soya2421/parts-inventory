@@ -258,8 +258,8 @@ export const apiClient = {
   deleteTag(id: number) {
     return request<{ ok: true }>(`/api/tags/${id}`, { method: "DELETE" });
   },
-  listProjects() {
-    return request<ProjectSummary[]>("/api/projects");
+  listProjects(partId?: number) {
+    return request<ProjectSummary[]>(partId ? `/api/projects?partId=${partId}` : "/api/projects");
   },
   getProject(id: number) {
     return request<ProjectDetail>(`/api/projects/${id}`);
@@ -269,6 +269,9 @@ export const apiClient = {
   },
   updateProject(id: number, input: ProjectWriteInput) {
     return request<ProjectDetail>(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify(input) });
+  },
+  addPartToProject(id: number, input: { partId: number; quantityRequired: number; memo?: string | null }) {
+    return request<ProjectDetail>(`/api/projects/${id}/parts`, { method: "POST", body: JSON.stringify(input) });
   },
   deleteProject(id: number) {
     return request<{ ok: true }>(`/api/projects/${id}`, { method: "DELETE" });

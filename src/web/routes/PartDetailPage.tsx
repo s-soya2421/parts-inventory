@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { PartDetail } from "@shared/types";
 import { StockAdjuster } from "../components/parts/StockAdjuster";
+import { PartProjectsPanel } from "../components/parts/PartProjectsPanel";
 import { Skeleton } from "../components/ui/Skeleton";
 import { apiClient } from "../lib/api-client";
 import { formatDate, formatPrice } from "../lib/format";
@@ -151,6 +152,8 @@ export function PartDetailPage() {
           )}
         </section>
       </aside>
+
+      <PartProjectsPanel partId={part.id} />
 
       <section className="panel-card p-3 sm:p-4 lg:col-span-2">
         <h2 className="mb-3 text-sm font-semibold">仕様一覧</h2>
