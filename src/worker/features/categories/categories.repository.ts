@@ -55,11 +55,27 @@ export class CategoriesRepository {
 
   async delete(id: number): Promise<void> {
     const usage = await this.db
-      .prepare("SELECT COUNT(*) AS cnt FROM parts WHERE category_id = ?")
+      .prepare(
+        `SELECT
+          SUM(CASE WHEN archived_at IS NULL THEN 1 ELSE 0 END) AS active_cnt,
+          SUM(CASE WHEN archived_at IS NOT NULL THEN 1 ELSE 0 END) AS archived_cnt
+         FROM parts WHERE category_id = ?`,
+      )
       .bind(id)
-      .first<{ cnt: number }>();
-    if ((usage?.cnt ?? 0) > 0) {
-      throw new AppError("CATEGORY_IN_USE", "Category is used by one or more parts.", 409);
+      .first<{ active_cnt: number | null; archived_cnt: number | null }>();
+    if ((usage?.active_cnt ?? 0) > 0) {
+      throw new AppError(
+        "CATEGORY_IN_USE",
+        "このカテゴリには部品が登録されているため削除できません。",
+        409,
+      );
+    }
+    if ((usage?.archived_cnt ?? 0) > 0) {
+      throw new AppError(
+        "CATEGORY_HAS_ARCHIVED_PARTS",
+        "このカテゴリにはアーカイブ(削除)済みの部品が残っているため削除できません。部品を完全に削除してから再度お試しください。",
+        409,
+      );
     }
 
     const result = await this.db.prepare("DELETE FROM categories WHERE id = ?").bind(id).run();

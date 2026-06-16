@@ -280,6 +280,64 @@ describe("attribute filter operators", () => {
   });
 });
 
+describe("category deletion", () => {
+  it("deletes a category with no parts", async () => {
+    const category = await client.request("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "DelEmptyCat" }),
+    });
+    const categoryId = category.body.data.id;
+
+    const { response } = await client.request(`/api/categories/${categoryId}`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(200);
+
+    const categories = await client.request("/api/categories");
+    expect(categories.body.data.some((c: any) => c.id === categoryId)).toBe(false);
+  });
+
+  it("blocks deletion with an active part (409 CATEGORY_IN_USE)", async () => {
+    const category = await client.request("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "DelActiveCat" }),
+    });
+    const categoryId = category.body.data.id;
+    await client.request("/api/parts", {
+      method: "POST",
+      body: JSON.stringify({ categoryId, modelNumber: "S-1", name: "p", stockQuantity: 1 }),
+    });
+
+    const { response, body } = await client.request(`/api/categories/${categoryId}`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("CATEGORY_IN_USE");
+  });
+
+  it("blocks deletion when only archived parts remain (409 CATEGORY_HAS_ARCHIVED_PARTS)", async () => {
+    const category = await client.request("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "DelArchivedCat" }),
+    });
+    const categoryId = category.body.data.id;
+    const part = await client.request("/api/parts", {
+      method: "POST",
+      body: JSON.stringify({ categoryId, modelNumber: "S-1", name: "p", stockQuantity: 1 }),
+    });
+    const partId = part.body.data.id;
+    await client.request(`/api/parts/${partId}`, {
+      method: "DELETE",
+    });
+
+    const { response, body } = await client.request(`/api/categories/${categoryId}`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("CATEGORY_HAS_ARCHIVED_PARTS");
+  });
+});
+
 async function findPartId(client: TestClient, categoryName: string, modelNumber: string): Promise<number> {
   const row = await client.db
     .prepare(
