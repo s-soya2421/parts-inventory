@@ -188,7 +188,7 @@ Body:
 
 ### DELETE `/api/categories/:id`
 
-カテゴリを削除する。アクティブな部品が紐づくカテゴリは `409 CATEGORY_IN_USE` を返す。アクティブな部品はないがアーカイブ(削除)済みの部品が残っているカテゴリは `409 CATEGORY_HAS_ARCHIVED_PARTS` を返す。
+カテゴリを削除する。アクティブな部品が紐づくカテゴリは `409 CATEGORY_IN_USE` を返す。アクティブな部品はないがアーカイブ(削除)済みの部品が残っているカテゴリは `409 CATEGORY_HAS_ARCHIVED_PARTS` を返し、レスポンスには `error.details.archivedParts` として残存するアーカイブ済み部品の `id` / `name` / `modelNumber` の配列が含まれる。`?force=true` を付けると、アーカイブ済み部品を完全削除した上でカテゴリを削除する。ただしアクティブな部品がある場合は `force` でも `CATEGORY_IN_USE` でブロックされる。
 
 ### GET `/api/categories/:id/attributes`
 

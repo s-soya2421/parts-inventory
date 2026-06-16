@@ -34,7 +34,8 @@ categoriesRoutes.put("/:id", async (c) => {
 categoriesRoutes.delete("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const repository = new CategoriesRepository(getDb(c.env));
-  await repository.delete(id);
+  const force = new URL(c.req.url).searchParams.get("force") === "true";
+  await repository.delete(id, { force });
   return c.json({ data: { ok: true } });
 });
 
