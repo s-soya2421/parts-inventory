@@ -53,7 +53,7 @@ export class CategoriesRepository {
     return mapCategory(row);
   }
 
-  async delete(id: number): Promise<void> {
+  async delete(id: number, options?: { force?: boolean }): Promise<void> {
     const usage = await this.db
       .prepare(
         `SELECT
@@ -71,10 +71,23 @@ export class CategoriesRepository {
       );
     }
     if ((usage?.archived_cnt ?? 0) > 0) {
+      if (options?.force) {
+        await this.db.batch([
+          this.db.prepare("DELETE FROM parts WHERE category_id = ? AND archived_at IS NOT NULL").bind(id),
+          this.db.prepare("DELETE FROM categories WHERE id = ?").bind(id),
+        ]);
+        return;
+      }
+
+      const archived = await this.db
+        .prepare("SELECT id, name, model_number FROM parts WHERE category_id = ? AND archived_at IS NOT NULL ORDER BY id")
+        .bind(id)
+        .all<{ id: number; name: string; model_number: string }>();
       throw new AppError(
         "CATEGORY_HAS_ARCHIVED_PARTS",
-        "このカテゴリにはアーカイブ(削除)済みの部品が残っているため削除できません。部品を完全に削除してから再度お試しください。",
+        "このカテゴリにはアーカイブ(削除)済みの部品が残っています。削除するとこれらも完全に削除されます。",
         409,
+        { archivedParts: archived.results.map((r) => ({ id: r.id, name: r.name, modelNumber: r.model_number })) },
       );
     }
 
