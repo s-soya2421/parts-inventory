@@ -188,7 +188,7 @@ Body:
 
 ### DELETE `/api/categories/:id`
 
-カテゴリを削除する。部品が紐づくカテゴリは `409 CATEGORY_IN_USE` を返す。
+カテゴリを削除する。アクティブな部品が紐づくカテゴリは `409 CATEGORY_IN_USE` を返す。アクティブな部品はないがアーカイブ(削除)済みの部品が残っているカテゴリは `409 CATEGORY_HAS_ARCHIVED_PARTS` を返す。
 
 ### GET `/api/categories/:id/attributes`
 
