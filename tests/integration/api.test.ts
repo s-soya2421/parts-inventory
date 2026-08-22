@@ -82,7 +82,7 @@ describe("bug reports", () => {
   });
 
   it("limits repeated reports from the same client", async () => {
-    for (let count = 0; count < 3; count += 1) {
+    for (let count = 0; count < 2; count += 1) {
       const { response } = await client.request("/api/bug-reports", {
         method: "POST",
         body: JSON.stringify({ ...input, title: `${input.title} ${count}` }),

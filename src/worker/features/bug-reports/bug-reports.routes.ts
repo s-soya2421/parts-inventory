@@ -7,7 +7,7 @@ import { bugReportWriteSchema } from "./bug-reports.schemas";
 
 type GitHubIssueResponse = { number?: unknown; html_url?: unknown; message?: unknown };
 
-const RATE_LIMIT_MAX_REQUESTS = 3;
+const RATE_LIMIT_MAX_REQUESTS = 2;
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 
 async function clientKey(c: { req: { header(name: string): string | undefined } }): Promise<string> {

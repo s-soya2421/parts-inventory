@@ -186,7 +186,7 @@ pnpm wrangler secret put GITHUB_ISSUE_ASSIGNEE
 - `GITHUB_ISSUE_ASSIGNEE`: 通知を受けるGitHubユーザー名。例: `s-soya2421`
 
 GitHub側の通知設定で「担当Issueのメール通知」を有効にすると、追加のメール送信サービスなしで通知できます。
-不具合報告APIは、同一接続元から1分に3件までに制限されます。パスワード、APIキー、個人情報などは報告に含めないでください。
+不具合報告APIは、同一接続元から1分に2件までに制限されます。パスワード、APIキー、個人情報などは報告に含めないでください。
 
 ## Current MVP Scope
 
