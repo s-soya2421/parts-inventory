@@ -90,10 +90,21 @@ pnpm build
 pnpm db:migrate:remote
 pnpm wrangler secret put BASIC_AUTH_USER
 pnpm wrangler secret put BASIC_AUTH_PASSWORD
+pnpm wrangler secret put GITHUB_TOKEN
+pnpm wrangler secret put GITHUB_REPOSITORY
+pnpm wrangler secret put GITHUB_ISSUE_ASSIGNEE
 pnpm wrangler deploy
 ```
 
 `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` はsecretとして登録し、リポジトリには保存しない。
+
+不具合報告をGitHub Issueとして作成する場合も、以下をCloudflare Secretとして設定する。
+
+- `GITHUB_TOKEN`: 対象リポジトリに限定したfine-grained token（Issues: Read and write）
+- `GITHUB_REPOSITORY`: `owner/repository` 形式
+- `GITHUB_ISSUE_ASSIGNEE`: Issueの担当者にするGitHubユーザー名
+
+トークン未設定でも報告内容はD1へ保存される。GitHubの通知設定で担当Issueのメール通知を有効にすると、別のメール送信サービスは不要。
 
 CIなどで環境変数が注入されていることを事前確認する場合は、以下を実行する。
 

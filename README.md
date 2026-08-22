@@ -167,8 +167,25 @@ pnpm wrangler deploy
 - `GET /api/import/batches` （取り込み履歴：7日以内は取り消し可）
 - `POST /api/import/batches/:id/revert` （取り込みの取り消し：新規分は削除、更新分は取り込み前へ復元）
 - `GET /api/export/parts`
+- `POST /api/bug-reports` （不具合報告をD1に保存し、GitHub連携設定済みならIssueを作成）
 
 画面とAPI全体はBasic認証で保護されます。`POST` / `PUT` / `DELETE` も Basic 認証で保護されます。
+
+## GitHub不具合報告連携
+
+不具合報告画面は常にD1に保存され、次のCloudflare Secretを設定するとGitHub Issueも作成します。
+
+```bash
+pnpm wrangler secret put GITHUB_TOKEN
+pnpm wrangler secret put GITHUB_REPOSITORY
+pnpm wrangler secret put GITHUB_ISSUE_ASSIGNEE
+```
+
+- `GITHUB_TOKEN`: 対象リポジトリの **Issues: Read and write** 権限だけを付与したfine-grained personal access token
+- `GITHUB_REPOSITORY`: `owner/repository` 形式。例: `s-soya2421/parts-inventory`
+- `GITHUB_ISSUE_ASSIGNEE`: 通知を受けるGitHubユーザー名。例: `s-soya2421`
+
+GitHub側の通知設定で「担当Issueのメール通知」を有効にすると、追加のメール送信サービスなしで通知できます。
 
 ## Current MVP Scope
 

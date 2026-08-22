@@ -1,4 +1,4 @@
-import type { AttributeDefinition, Category, CategoryListHeader, Location, PartDetail, PartsAnalytics, PartStatus, PartSummary, PartWriteInput, ProjectDetail, ProjectSummary, ProjectWriteInput, Tag } from "@shared/types";
+import type { AttributeDefinition, BugReport, Category, CategoryListHeader, Location, PartDetail, PartsAnalytics, PartStatus, PartSummary, PartWriteInput, ProjectDetail, ProjectSummary, ProjectWriteInput, Tag } from "@shared/types";
 
 type ApiEnvelope<T> = { data: T };
 type ApiErrorBody = { error?: { code?: string; message?: string; issues?: unknown; details?: unknown } };
@@ -18,6 +18,15 @@ export type ImportBatchSummary = {
 export type BulkUpdatePartsInput = Partial<
   Pick<PartWriteInput, "categoryId" | "manufacturer" | "footprint" | "locationName" | "caseNumber" | "lowStockThreshold" | "statusId">
 >;
+
+export type BugReportInput = {
+  title: string;
+  description: string;
+  stepsToReproduce?: string;
+  expectedBehavior?: string;
+  actualBehavior?: string;
+  severity?: "low" | "normal" | "high" | "critical";
+};
 
 // --- In-memory cache (resource-aware TTL + stale-while-revalidate + request coalescing) ---
 const DEFAULT_TTL_MS = 30_000;
@@ -182,6 +191,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const apiClient = {
+  createBugReport(input: BugReportInput) {
+    return request<BugReport>("/api/bug-reports", { method: "POST", body: JSON.stringify(input) });
+  },
   async listParts(search: URLSearchParams) {
     const url = `/api/parts?${search.toString()}`;
     const body = await requestBody<{ data: PartSummary[]; total: number; page: number; pageSize: number }>(url);

@@ -18,6 +18,7 @@ describe("primary pages smoke", () => {
     expect(app).toContain('path="/projects/:id"');
     expect(app).toContain('path="/projects/:id/edit"');
     expect(app).toContain('path="/find"');
+    expect(app).toContain('path="/bug-report"');
     expect(app).toContain('path="/categories"');
     expect(app).toContain('path="/categories/:id/settings"');
     expect(app).toContain('path="/import"');
@@ -33,6 +34,7 @@ describe("primary pages smoke", () => {
     expect(read("src/web/routes/ProjectCreatePage.tsx")).toContain("プロジェクト登録");
     expect(read("src/web/routes/ImportPage.tsx")).toContain("JSONインポート");
     expect(read("src/web/routes/ExportPage.tsx")).toContain("エクスポート");
+    expect(read("src/web/routes/BugReportPage.tsx")).toContain("不具合を報告");
     expect(read("src/web/routes/SettingsPage.tsx")).toContain("管理");
   });
 
