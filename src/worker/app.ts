@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { errorHandler } from "./middleware/error-handler";
 import { requireBasicAuth } from "./middleware/basic-auth";
 import { requestLogger } from "./middleware/request-logger";
+import { applySecurityHeaders } from "./middleware/security-headers";
 import { categoriesRoutes } from "./features/categories/categories.routes";
 import { bugReportsRoutes } from "./features/bug-reports/bug-reports.routes";
 import { exportRoutes } from "./features/export/export.routes";
@@ -16,6 +17,7 @@ import type { Env } from "./types";
 export const app = new Hono<Env>();
 
 app.onError(errorHandler);
+app.use("*", applySecurityHeaders);
 app.use("/api/*", requestLogger);
 app.use("*", requireBasicAuth);
 

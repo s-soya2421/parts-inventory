@@ -23,6 +23,11 @@ function mapBugReport(row: DbBugReportRow): BugReport {
 export class BugReportsRepository {
   constructor(private readonly db: D1Database) {}
 
+  // GitHub keeps created Issues under its own retention policy; the app copy is short-lived.
+  async purgeExpired(): Promise<void> {
+    await this.db.prepare("DELETE FROM bug_reports WHERE created_at < datetime('now', '-90 days')").run();
+  }
+
   async consumeSubmissionSlot(clientKey: string, nowSeconds: number): Promise<{ requestCount: number; windowStartedAt: number }> {
     const windowSeconds = 60;
     const windowStart = nowSeconds - windowSeconds;

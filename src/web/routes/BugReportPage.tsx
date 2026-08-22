@@ -60,7 +60,7 @@ export function BugReportPage() {
       <section className="panel-card p-4">
         <h1 className="text-xl font-semibold text-slate-950">不具合を報告</h1>
         <p className="mt-1 text-sm text-slate-600">内容はGitHub Issueとして登録されます。再現手順を具体的に書いてもらえると、修正しやすくなります。</p>
-        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">パスワード、APIキー、個人情報、購入情報などの秘密は入力しないでください。報告内容はGitHub Issueに転記されます。</p>
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">パスワード、APIキー、個人情報、購入情報などの秘密は入力しないでください。報告内容はGitHub Issueに転記され、サイト側の控えは最大90日保存されます。</p>
       </section>
 
       <form className="panel-card grid max-w-3xl gap-4 p-4" onSubmit={submit}>

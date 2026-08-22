@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { getDb } from "../../db/client";
 import type { Env } from "../../types";
+import { parseJsonBody } from "../../middleware/request-body";
 import { ProjectsRepository } from "./projects.repository";
 import { ProjectsService } from "./projects.service";
 import { projectPartInputSchema, projectWriteSchema } from "./projects.schemas";
@@ -19,7 +20,7 @@ projectsRoutes.get("/", async (c) => {
 });
 
 projectsRoutes.post("/", async (c) => {
-  const input = projectWriteSchema.parse(await c.req.json());
+  const input = projectWriteSchema.parse(await parseJsonBody(c));
   const service = createService(getDb(c.env));
   return c.json({ data: await service.create(input) }, 201);
 });
@@ -32,14 +33,14 @@ projectsRoutes.get("/:id", async (c) => {
 
 projectsRoutes.put("/:id", async (c) => {
   const id = Number(c.req.param("id"));
-  const input = projectWriteSchema.parse(await c.req.json());
+  const input = projectWriteSchema.parse(await parseJsonBody(c));
   const service = createService(getDb(c.env));
   return c.json({ data: await service.update(id, input) });
 });
 
 projectsRoutes.post("/:id/parts", async (c) => {
   const id = Number(c.req.param("id"));
-  const input = projectPartInputSchema.parse(await c.req.json());
+  const input = projectPartInputSchema.parse(await parseJsonBody(c));
   const service = createService(getDb(c.env));
   return c.json({ data: await service.addPart(id, input) });
 });

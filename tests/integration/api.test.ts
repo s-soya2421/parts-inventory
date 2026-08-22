@@ -31,6 +31,22 @@ describe("auth", () => {
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
   });
+
+  it("adds security headers and prevents API caching", async () => {
+    const response = await client.raw("/api/health");
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("rejects JSON request bodies larger than one megabyte", async () => {
+    const response = await client.raw("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "x".repeat(1_000_000) }),
+    });
+    expect(response.status).toBe(413);
+  });
 });
 
 describe("bug reports", () => {
