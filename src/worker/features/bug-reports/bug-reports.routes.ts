@@ -1,10 +1,20 @@
 import { Hono } from "hono";
 import { getDb } from "../../db/client";
+import { AppError } from "../../middleware/error-handler";
 import type { Env } from "../../types";
 import { BugReportsRepository } from "./bug-reports.repository";
 import { bugReportWriteSchema } from "./bug-reports.schemas";
 
 type GitHubIssueResponse = { number?: unknown; html_url?: unknown; message?: unknown };
+
+const RATE_LIMIT_MAX_REQUESTS = 3;
+const RATE_LIMIT_WINDOW_SECONDS = 60;
+
+async function clientKey(c: { req: { header(name: string): string | undefined } }): Promise<string> {
+  const rawAddress = (c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0] ?? "unknown").trim();
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawAddress));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 function formatIssueBody(input: {
   description: string;
@@ -63,6 +73,13 @@ export const bugReportsRoutes = new Hono<Env>();
 bugReportsRoutes.post("/", async (c) => {
   const input = bugReportWriteSchema.parse(await c.req.json());
   const repository = new BugReportsRepository(getDb(c.env));
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const limit = await repository.consumeSubmissionSlot(await clientKey(c), nowSeconds);
+  if (limit.requestCount > RATE_LIMIT_MAX_REQUESTS) {
+    const retryAfterSeconds = Math.max(1, RATE_LIMIT_WINDOW_SECONDS - (nowSeconds - limit.windowStartedAt));
+    c.header("retry-after", String(retryAfterSeconds));
+    throw new AppError("BUG_REPORT_RATE_LIMITED", "Too many bug reports. Please try again shortly.", 429, { retryAfterSeconds });
+  }
   const saved = await repository.create(input);
 
   try {

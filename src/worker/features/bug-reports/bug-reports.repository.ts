@@ -23,6 +23,29 @@ function mapBugReport(row: DbBugReportRow): BugReport {
 export class BugReportsRepository {
   constructor(private readonly db: D1Database) {}
 
+  async consumeSubmissionSlot(clientKey: string, nowSeconds: number): Promise<{ requestCount: number; windowStartedAt: number }> {
+    const windowSeconds = 60;
+    const windowStart = nowSeconds - windowSeconds;
+    await this.db
+      .prepare("DELETE FROM bug_report_rate_limits WHERE window_started_at < ?")
+      .bind(nowSeconds - 60 * 60)
+      .run();
+
+    const row = await this.db
+      .prepare(
+        `INSERT INTO bug_report_rate_limits (client_key, window_started_at, request_count)
+         VALUES (?, ?, 1)
+         ON CONFLICT(client_key) DO UPDATE SET
+           request_count = CASE WHEN bug_report_rate_limits.window_started_at <= ? THEN 1 ELSE bug_report_rate_limits.request_count + 1 END,
+           window_started_at = CASE WHEN bug_report_rate_limits.window_started_at <= ? THEN excluded.window_started_at ELSE bug_report_rate_limits.window_started_at END
+         RETURNING request_count, window_started_at`,
+      )
+      .bind(clientKey, nowSeconds, windowStart, windowStart)
+      .first<{ request_count: number; window_started_at: number }>();
+    if (!row) throw new AppError("BUG_REPORT_RATE_LIMIT_FAILED", "Failed to apply submission rate limit.", 500);
+    return { requestCount: row.request_count, windowStartedAt: row.window_started_at };
+  }
+
   async create(input: BugReportWriteInput): Promise<BugReport> {
     const row = await this.db
       .prepare(

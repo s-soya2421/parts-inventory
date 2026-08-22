@@ -80,6 +80,24 @@ describe("bug reports", () => {
       assignees: ["s-soya2421"],
     });
   });
+
+  it("limits repeated reports from the same client", async () => {
+    for (let count = 0; count < 3; count += 1) {
+      const { response } = await client.request("/api/bug-reports", {
+        method: "POST",
+        body: JSON.stringify({ ...input, title: `${input.title} ${count}` }),
+      });
+      expect(response.status).toBe(201);
+    }
+
+    const { response, body } = await client.request("/api/bug-reports", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBeTruthy();
+    expect(body.error.code).toBe("BUG_REPORT_RATE_LIMITED");
+  });
 });
 
 describe("parts CRUD", () => {
