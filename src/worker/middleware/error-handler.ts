@@ -6,8 +6,8 @@ function logServerError(error: unknown, c: Context<Env>) {
   const metadata = {
     event: "unhandled_server_error",
     method: c.req.method,
-    url: c.req.url,
-    clientIp: c.req.header("x-forwarded-for") ?? c.req.header("cf-connecting-ip") ?? "unknown",
+    // Do not retain query parameters or client IP addresses in application logs.
+    path: new URL(c.req.url).pathname,
   };
 
   if (error instanceof Error) {
