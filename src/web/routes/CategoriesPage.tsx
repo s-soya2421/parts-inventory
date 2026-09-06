@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Category, PartSummary, Tag } from "@shared/types";
 import { Loading } from "../components/ui/Loading";
-import { apiClient } from "../lib/api-client";
+import { apiClient, ApiError } from "../lib/api-client";
 import { formatDate } from "../lib/format";
 
 export function CategoriesPage() {
@@ -100,6 +100,22 @@ function CategoryTab() {
       await apiClient.deleteCategory(category.id);
       load();
     } catch (err) {
+      if (err instanceof ApiError && err.code === "CATEGORY_HAS_ARCHIVED_PARTS") {
+        const details = err.details as { archivedParts?: { name: string; modelNumber: string }[] } | undefined;
+        const parts = details?.archivedParts ?? [];
+        const list = parts.map((p) => `・${p.name}（${p.modelNumber}）`).join("\n");
+        const ok = confirm(
+          `「${category.name}」には以下のアーカイブ済み部品が残っています。\nカテゴリと一緒に完全に削除されます。元に戻せません。\n\n${list}\n\n削除してよろしいですか？`,
+        );
+        if (!ok) return;
+        try {
+          await apiClient.deleteCategory(category.id, { force: true });
+          load();
+        } catch (forceErr) {
+          setError(forceErr instanceof Error ? forceErr.message : "カテゴリの削除に失敗しました");
+        }
+        return;
+      }
       setError(err instanceof Error ? err.message : "カテゴリの削除に失敗しました");
     }
   }

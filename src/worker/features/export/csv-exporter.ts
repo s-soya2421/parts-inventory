@@ -43,7 +43,9 @@ export class CsvExporter {
   }
 
   private escapeCell(value: string | number | null): string {
-    const text = value == null ? "" : String(value);
+    const rawText = value == null ? "" : String(value);
+    // Spreadsheet programs may evaluate these prefixes as a formula when a CSV is opened.
+    const text = /^[=+\-@]/.test(rawText) ? `'${rawText}` : rawText;
     if (/["\n\r,]/.test(text)) {
       return `"${text.replace(/"/g, '""')}"`;
     }

@@ -81,18 +81,6 @@ export class PartsService {
       input.locationId ??
       (input.locationName ? await this.partsRepository.ensureLocationByName(input.locationName) : null);
 
-    const stockMovement =
-      existing.stockQuantity !== input.stockQuantity
-        ? {
-            movementType: "set" as const,
-            quantityDelta: input.stockQuantity - existing.stockQuantity,
-            quantityBefore: existing.stockQuantity,
-            quantityAfter: input.stockQuantity,
-            reason: "edit",
-            memo: "Stock changed from edit form",
-          }
-        : undefined;
-
     await this.partsRepository.update(
       id,
       {
@@ -113,7 +101,6 @@ export class PartsService {
         }),
       },
       tagIds,
-      stockMovement,
     );
 
     return this.getDetail(id);
@@ -157,30 +144,35 @@ export class PartsService {
   }
 
   async changeStock(id: number, input: StockChangeInput): Promise<PartDetail> {
-    const part = await this.partsRepository.getById(id);
-    if (!part) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
+    // A concurrent writer can change stock after the read. Retry from its latest
+    // value; the repository records a movement only when the comparison succeeds.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const part = await this.partsRepository.getById(id);
+      if (!part) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
 
-    const before = part.stockQuantity;
-    const after =
-      input.type === "set"
-        ? input.quantity
-        : input.type === "adjustment"
-          ? before + input.quantity
-          : input.type === "out" || input.type === "use" || input.type === "dispose"
-            ? before - Math.abs(input.quantity)
-            : before + input.quantity;
+      const before = part.stockQuantity;
+      const after =
+        input.type === "set"
+          ? input.quantity
+          : input.type === "adjustment"
+            ? before + input.quantity
+            : input.type === "out" || input.type === "use" || input.type === "dispose"
+              ? before - Math.abs(input.quantity)
+              : before + input.quantity;
 
-    if (after < 0) throw new AppError("NEGATIVE_STOCK", "Stock quantity cannot be negative.", 400);
+      if (after < 0) throw new AppError("NEGATIVE_STOCK", "Stock quantity cannot be negative.", 400);
 
-    await this.partsRepository.updateStockWithMovement(id, after, {
-      movementType: input.type,
-      quantityDelta: after - before,
-      quantityBefore: before,
-      quantityAfter: after,
-      reason: input.reason,
-      memo: input.memo,
-    });
-    return this.getDetail(id);
+      const changed = await this.partsRepository.updateStockWithMovement(id, after, {
+        movementType: input.type,
+        quantityDelta: after - before,
+        quantityBefore: before,
+        quantityAfter: after,
+        reason: input.reason,
+        memo: input.memo,
+      });
+      if (changed) return this.getDetail(id);
+    }
+    throw new AppError("STOCK_CONFLICT", "Stock changed concurrently. Please try again.", 409);
   }
 
   async listMovements(id: number) {

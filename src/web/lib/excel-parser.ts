@@ -175,6 +175,7 @@ function splitTags(value: string): string[] {
 // 1ブロック＋マッピング＋オプションから取り込み用の行を生成
 export function buildRowsForBlock(block: ExcelBlock, mapping: BlockMapping, options: BuildOptions): ImportRow[] {
   const result: ImportRow[] = [];
+  const mappedTargets = new Set(Object.values(mapping));
 
   for (const cells of block.rows) {
     const identifierParts: string[] = [];
@@ -260,11 +261,11 @@ export function buildRowsForBlock(block: ExcelBlock, mapping: BlockMapping, opti
       model_number: finalModel,
       name: finalName,
       stock_quantity: stockQuantity,
-      price,
-      footprint,
-      manufacturer,
-      case_number: caseNumber,
-      memo: memo || null,
+      price: mappedTargets.has("price") ? price : undefined,
+      footprint: mappedTargets.has("footprint") ? footprint : undefined,
+      manufacturer: mappedTargets.has("manufacturer") ? manufacturer : undefined,
+      case_number: mappedTargets.has("case_number") ? caseNumber : undefined,
+      memo: memo || (mappedTargets.has("memo") ? null : undefined),
       low_stock_threshold: lowStockThreshold,
       tags: tags.length > 0 ? [...new Set(tags)].join(",") : undefined,
       attributes_json: Object.keys(attributes).length > 0 ? attributes : undefined,

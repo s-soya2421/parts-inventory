@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { Category, CategoryListHeader, PartStatus, PartSummary, Tag } from "@shared/types";
+import { PartsSearchInput } from "../components/parts/PartsSearchInput";
 import { Skeleton } from "../components/ui/Skeleton";
 import { apiClient, type BulkUpdatePartsInput } from "../lib/api-client";
 import { getColumnOrderScope, getStoredColumnOrder, getStoredHiddenColumns, hasStoredHiddenColumns, removeStoredColumnOrder, setStoredColumnOrder, setStoredHiddenColumns } from "../lib/column-order-storage";
@@ -957,7 +958,7 @@ export function PartsListPage() {
                 {tab.label}
               </button>
             ))}
-            <input className="h-8 min-w-[220px] rounded border border-slate-300 px-2 text-xs sm:min-w-[260px]" placeholder="型番・メーカー・メモ・属性を検索" value={searchParams.get("q") ?? ""} onChange={(event) => updateFilter("q", event.target.value)} />
+            <PartsSearchInput value={searchParams.get("q") ?? ""} onValueChange={(value) => updateFilter("q", value)} />
             <select className="h-8 rounded border border-slate-300 px-2 text-xs" value={searchParams.get("categoryId") ?? ""} onChange={(event) => updateFilter("categoryId", event.target.value)}>
               <option value="">全カテゴリ</option>
               {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}

@@ -194,6 +194,21 @@ export type Location = {
   updatedAt: string;
 };
 
+export type BugReport = {
+  id: number;
+  title: string;
+  description: string;
+  stepsToReproduce?: string | null;
+  expectedBehavior?: string | null;
+  actualBehavior?: string | null;
+  severity: "low" | "normal" | "high" | "critical";
+  githubIssueNumber?: number | null;
+  githubIssueUrl?: string | null;
+  githubSyncStatus: "pending" | "created" | "failed";
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ProjectPartLine = {
   id: number;
   partId: number;

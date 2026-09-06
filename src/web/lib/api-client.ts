@@ -1,7 +1,7 @@
-import type { AttributeDefinition, Category, CategoryListHeader, Location, PartDetail, PartsAnalytics, PartStatus, PartSummary, PartWriteInput, ProjectDetail, ProjectSummary, ProjectWriteInput, Tag } from "@shared/types";
+import type { AttributeDefinition, BugReport, Category, CategoryListHeader, Location, PartDetail, PartsAnalytics, PartStatus, PartSummary, PartWriteInput, ProjectDetail, ProjectSummary, ProjectWriteInput, Tag } from "@shared/types";
 
 type ApiEnvelope<T> = { data: T };
-type ApiErrorBody = { error?: { message?: string; issues?: unknown } };
+type ApiErrorBody = { error?: { code?: string; message?: string; issues?: unknown; details?: unknown } };
 
 export type ImportBatchSummary = {
   id: number;
@@ -18,6 +18,15 @@ export type ImportBatchSummary = {
 export type BulkUpdatePartsInput = Partial<
   Pick<PartWriteInput, "categoryId" | "manufacturer" | "footprint" | "locationName" | "caseNumber" | "lowStockThreshold" | "statusId">
 >;
+
+export type BugReportInput = {
+  title: string;
+  description: string;
+  stepsToReproduce?: string;
+  expectedBehavior?: string;
+  actualBehavior?: string;
+  severity?: "low" | "normal" | "high" | "critical";
+};
 
 // --- In-memory cache (resource-aware TTL + stale-while-revalidate + request coalescing) ---
 const DEFAULT_TTL_MS = 30_000;
@@ -107,6 +116,13 @@ function formatApiError(body: ApiErrorBody | null): string {
   return `${error.message ?? "API error"}${issues}`;
 }
 
+export class ApiError extends Error {
+  constructor(message: string, public code?: string, public status?: number, public details?: unknown) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 // 実フェッチ＋キャッシュ保存。同一キーが進行中ならそのPromiseを共有する（coalescing）。
 function fetchAndCache<TBody>(key: string, path: string, init: RequestInit): Promise<TBody> {
   const existing = inflight.get(key);
@@ -117,7 +133,7 @@ function fetchAndCache<TBody>(key: string, path: string, init: RequestInit): Pro
   record.promise = (async () => {
     const response = await fetch(path, init);
     const body = (await response.json().catch(() => null)) as (TBody & ApiErrorBody) | null;
-    if (!response.ok) throw new Error(formatApiError(body));
+    if (!response.ok) throw new ApiError(formatApiError(body), body?.error?.code, response.status, body?.error?.details);
     // 取得中に無効化されていなければ保存する。
     if (record.valid) setCacheEntry(key, body, ttlFor(pathnameOf(path)));
     return body as TBody;
@@ -144,7 +160,7 @@ async function requestBody<TBody>(path: string, init: RequestInit = {}): Promise
   if (method !== "GET") {
     const response = await fetch(path, fetchInit);
     const body = (await response.json().catch(() => null)) as (TBody & ApiErrorBody) | null;
-    if (!response.ok) throw new Error(formatApiError(body));
+    if (!response.ok) throw new ApiError(formatApiError(body), body?.error?.code, response.status, body?.error?.details);
     // Mutation: invalidate the touched segment.
     const segment = path.replace(/^\/api\//, "").split(/[/?]/)[0];
     invalidateCache(`/api/${segment}`);
@@ -175,6 +191,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const apiClient = {
+  createBugReport(input: BugReportInput) {
+    return request<BugReport>("/api/bug-reports", { method: "POST", body: JSON.stringify(input) });
+  },
   async listParts(search: URLSearchParams) {
     const url = `/api/parts?${search.toString()}`;
     const body = await requestBody<{ data: PartSummary[]; total: number; page: number; pageSize: number }>(url);
@@ -219,8 +238,9 @@ export const apiClient = {
   updateCategory(id: number, input: { name: string; slug?: string }) {
     return request<Category>(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(input) });
   },
-  deleteCategory(id: number) {
-    return request<{ ok: true }>(`/api/categories/${id}`, { method: "DELETE" });
+  deleteCategory(id: number, options?: { force?: boolean }) {
+    const query = options?.force ? "?force=true" : "";
+    return request<{ ok: true }>(`/api/categories/${id}${query}`, { method: "DELETE" });
   },
   listCategoryAttributes(id: number) {
     return request<AttributeDefinition[]>(`/api/categories/${id}/attributes`);

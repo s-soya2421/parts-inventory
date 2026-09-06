@@ -121,6 +121,8 @@ Body:
 
 在庫数が変わった場合は `stock_movements` に `set` を記録する。
 
+部品本体・属性・タグ・代替部品・在庫履歴の更新は同一トランザクションで行い、途中で失敗した場合はすべて取り消す。在庫履歴の変更前の数量はトランザクション内の値を使う。
+
 ### DELETE `/api/parts/:id`
 
 部品をアーカイブする。
@@ -161,6 +163,8 @@ Body:
 
 `type` は `in`, `out`, `set`, `adjustment`, `use`, `dispose`。`adjustment` は符号付き差分、`set` は0以上の指定数。結果が負数になる変更は拒否する。
 
+同時更新があった場合は最新の在庫数から再計算する。最大5回の試行でも競合が続く場合は `409 STOCK_CONFLICT` を返す。競合で適用されなかった試行の履歴は記録しない。
+
 ### GET `/api/parts/:id/movements`
 
 在庫変更履歴を返す。
@@ -188,7 +192,7 @@ Body:
 
 ### DELETE `/api/categories/:id`
 
-カテゴリを削除する。部品が紐づくカテゴリは `409 CATEGORY_IN_USE` を返す。
+カテゴリを削除する。アクティブな部品が紐づくカテゴリは `409 CATEGORY_IN_USE` を返す。アクティブな部品はないがアーカイブ(削除)済みの部品が残っているカテゴリは `409 CATEGORY_HAS_ARCHIVED_PARTS` を返し、レスポンスには `error.details.archivedParts` として残存するアーカイブ済み部品の `id` / `name` / `modelNumber` の配列が含まれる。`?force=true` を付けると、アーカイブ済み部品を完全削除した上でカテゴリを削除する。ただしアクティブな部品がある場合は `force` でも `CATEGORY_IN_USE` でブロックされる。
 
 ### GET `/api/categories/:id/attributes`
 
@@ -297,6 +301,10 @@ Body:
 ```
 
 `attributes_json` は文字列JSONまたはオブジェクトを受け付け、`part_attributes` とカテゴリ定義に合う `part_attribute_values` へ展開する。
+
+カテゴリは `category` の名前で既存レコードに対応付ける。標準カテゴリの日本語名にも対応する。同名カテゴリが複数ある場合、または新しい名前から生成されるslugが別カテゴリと衝突する場合は、その行を失敗として返す。
+
+`mode: "update"` では、省略された任意項目（価格・メーカー・フットプリント・ケース番号・メモ・タグ・属性・低在庫しきい値）を保持する。対応項目に明示した `null` や空配列・空オブジェクトはクリアとして扱う。取り込み形式にない説明・保管場所・購入URL・データシートURL・ステータス・代替部品も保持する。JSONの欠落項目とExcelの未割り当ての任意列は、省略として送信する。Excelの低在庫しきい値は画面で指定した設定を適用する。
 
 ### GET `/api/import/batches`
 

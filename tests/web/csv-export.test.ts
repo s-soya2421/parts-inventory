@@ -45,6 +45,12 @@ describe("CsvExporter", () => {
     expect(text).toBe(`${BOM}plain\r\nhello\r\n`);
   });
 
+  it("neutralizes spreadsheet formula prefixes", async () => {
+    const text = await csvText({ a: [{ formula: "=HYPERLINK(\"https://example.com\")", plus: "+1", minus: "-1", at: "@name" }] });
+    const lines = text.replace(BOM, "").trimEnd().split("\r\n");
+    expect(lines[1]).toBe(`"'=HYPERLINK(""https://example.com"")",'+1,'-1,'@name`);
+  });
+
   it("unions columns across rows and fills missing cells with empty strings", async () => {
     const text = await csvText({
       cat1: [{ a: "1", b: "2" }],

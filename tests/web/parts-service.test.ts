@@ -124,7 +124,7 @@ describe("PartsService", () => {
   it("applies signed adjustment stock changes", async () => {
     const partsRepository = createMock<PartsRepository>({
       getById: vi.fn().mockResolvedValue({ id: 1, stockQuantity: 10 }),
-      updateStockWithMovement: vi.fn().mockResolvedValue(undefined),
+      updateStockWithMovement: vi.fn().mockResolvedValue(true),
       listMovements: vi.fn().mockResolvedValue([]),
       listAlternatives: vi.fn().mockResolvedValue([]),
     });
@@ -151,7 +151,7 @@ describe("PartsService", () => {
   it("allows setting stock quantity to zero", async () => {
     const partsRepository = createMock<PartsRepository>({
       getById: vi.fn().mockResolvedValue({ id: 1, stockQuantity: 10 }),
-      updateStockWithMovement: vi.fn().mockResolvedValue(undefined),
+      updateStockWithMovement: vi.fn().mockResolvedValue(true),
       listMovements: vi.fn().mockResolvedValue([]),
       listAlternatives: vi.fn().mockResolvedValue([]),
     });
@@ -173,5 +173,16 @@ describe("PartsService", () => {
         quantityAfter: 0,
       }),
     );
+  });
+
+  it("returns a retryable conflict when stock keeps changing", async () => {
+    const partsRepository = createMock<PartsRepository>({
+      getById: vi.fn().mockResolvedValue({ id: 1, stockQuantity: 10 }),
+      updateStockWithMovement: vi.fn().mockResolvedValue(false),
+    });
+    const service = new PartsService(partsRepository, createMock<CategoriesRepository>({}), createMock<TagsRepository>({}));
+    await expect(service.changeStock(1, { type: "out", quantity: 1 }))
+      .rejects.toMatchObject({ code: "STOCK_CONFLICT", status: 409 });
+    expect(partsRepository.updateStockWithMovement).toHaveBeenCalledTimes(5);
   });
 });

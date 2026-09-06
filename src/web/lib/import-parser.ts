@@ -9,7 +9,7 @@ export type ImportPreviewRow = {
   manufacturer?: string | null;
   tags?: string;
   memo?: string | null;
-  low_stock_threshold: number;
+  low_stock_threshold?: number;
   attributes_json?: string | Record<string, { value: string | number; unit?: string; label?: string }>;
 };
 
@@ -63,7 +63,7 @@ function normalizeRows(rows: Record<string, unknown>[]): ImportRow[] {
       manufacturer: readNullableString(row, "manufacturer"),
       tags: readTags(row),
       memo: readNullableString(row, "memo"),
-      low_stock_threshold: readNumber(row, "low_stock_threshold", 0),
+      low_stock_threshold: readValue(row, "low_stock_threshold") === undefined ? undefined : readNumber(row, "low_stock_threshold", 0),
       attributes_json: readAttributes(row),
     }))
     .filter((row) => row.category && row.model_number && row.name);
@@ -73,7 +73,8 @@ function readString(row: Record<string, unknown>, key: keyof ImportPreviewRow): 
   return String(readValue(row, key) ?? "").trim();
 }
 
-function readNullableString(row: Record<string, unknown>, key: keyof ImportPreviewRow): string | null {
+function readNullableString(row: Record<string, unknown>, key: keyof ImportPreviewRow): string | null | undefined {
+  if (readValue(row, key) === undefined) return undefined;
   const value = readString(row, key);
   return value ? value : null;
 }
@@ -84,16 +85,18 @@ function readNumber(row: Record<string, unknown>, key: keyof ImportPreviewRow, f
   return Number.isFinite(number) ? number : fallback;
 }
 
-function readOptionalNumber(row: Record<string, unknown>, key: keyof ImportPreviewRow): number | null {
+function readOptionalNumber(row: Record<string, unknown>, key: keyof ImportPreviewRow): number | null | undefined {
   const value = readValue(row, key);
+  if (value === undefined) return undefined;
   if (value === "" || value == null) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
 // tags may be a comma-separated string, or the raw export's Tag[] (array of { name }).
-function readTags(row: Record<string, unknown>): string {
+function readTags(row: Record<string, unknown>): string | undefined {
   const value = readValue(row, "tags");
+  if (value === undefined) return undefined;
   if (Array.isArray(value)) {
     return value
       .map((tag) =>

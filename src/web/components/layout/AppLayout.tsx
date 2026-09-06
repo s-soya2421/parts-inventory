@@ -9,6 +9,7 @@ const navItems = [
   { to: "/projects", label: "プロジェクト" },
   { to: "/parts/new", label: "新規作成" },
   { to: "/parts?stockStatus=low_stock", label: "低在庫アラート" },
+  { to: "/bug-report", label: "不具合報告" },
   { to: "/settings", label: "設定" },
 ];
 

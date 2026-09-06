@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { getDb } from "../../db/client";
 import type { Env } from "../../types";
+import { parseJsonBody } from "../../middleware/request-body";
 import { PartsRepository } from "../parts/parts.repository";
 import { TagsRepository } from "./tags.repository";
 import { tagWriteSchema } from "./tags.schemas";
@@ -13,14 +14,14 @@ tagsRoutes.get("/", async (c) => {
 });
 
 tagsRoutes.post("/", async (c) => {
-  const input = tagWriteSchema.parse(await c.req.json());
+  const input = tagWriteSchema.parse(await parseJsonBody(c));
   const repository = new TagsRepository(getDb(c.env));
   return c.json({ data: await repository.create(input) }, 201);
 });
 
 tagsRoutes.put("/:id", async (c) => {
   const id = Number(c.req.param("id"));
-  const input = tagWriteSchema.parse(await c.req.json());
+  const input = tagWriteSchema.parse(await parseJsonBody(c));
   const db = getDb(c.env);
   const repository = new TagsRepository(db);
   const tag = await repository.update(id, input);

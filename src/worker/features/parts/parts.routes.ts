@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "../../db/client";
 import type { Env } from "../../types";
+import { parseJsonBody } from "../../middleware/request-body";
 import { CategoriesRepository } from "../categories/categories.repository";
 import { TagsRepository } from "../tags/tags.repository";
 import { PartsRepository, type PartListFilters } from "./parts.repository";
@@ -108,7 +109,7 @@ partsRoutes.get("/:id", async (c) => {
 });
 
 partsRoutes.post("/bulk/archive", async (c) => {
-  const { ids } = bulkDeleteSchema.parse(await c.req.json());
+  const { ids } = bulkDeleteSchema.parse(await parseJsonBody(c));
   console.log(JSON.stringify({ event: "bulk_archive", ids }));
   const service = createService(getDb(c.env));
   await service.bulkArchive(ids);
@@ -116,7 +117,7 @@ partsRoutes.post("/bulk/archive", async (c) => {
 });
 
 partsRoutes.post("/bulk/update", async (c) => {
-  const { ids, data } = bulkUpdateSchema.parse(await c.req.json());
+  const { ids, data } = bulkUpdateSchema.parse(await parseJsonBody(c));
   console.log(JSON.stringify({ event: "bulk_update", ids, data }));
   const service = createService(getDb(c.env));
   await service.bulkUpdate(ids, data);
@@ -124,13 +125,13 @@ partsRoutes.post("/bulk/update", async (c) => {
 });
 
 partsRoutes.post("/", async (c) => {
-  const input = partWriteSchema.parse(await c.req.json());
+  const input = partWriteSchema.parse(await parseJsonBody(c));
   const service = createService(getDb(c.env));
   return c.json({ data: await service.create(input) }, 201);
 });
 
 partsRoutes.put("/:id", async (c) => {
-  const input = partWriteSchema.parse(await c.req.json());
+  const input = partWriteSchema.parse(await parseJsonBody(c));
   const service = createService(getDb(c.env));
   return c.json({ data: await service.update(Number(c.req.param("id")), input) });
 });
@@ -154,7 +155,7 @@ partsRoutes.delete("/:id/permanent", async (c) => {
 });
 
 partsRoutes.post("/:id/stock", async (c) => {
-  const input = stockChangeSchema.parse(await c.req.json());
+  const input = stockChangeSchema.parse(await parseJsonBody(c));
   const service = createService(getDb(c.env));
   return c.json({ data: await service.changeStock(Number(c.req.param("id")), input) });
 });

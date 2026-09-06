@@ -2,7 +2,9 @@ import { Hono } from "hono";
 import { errorHandler } from "./middleware/error-handler";
 import { requireBasicAuth } from "./middleware/basic-auth";
 import { requestLogger } from "./middleware/request-logger";
+import { applySecurityHeaders } from "./middleware/security-headers";
 import { categoriesRoutes } from "./features/categories/categories.routes";
+import { bugReportsRoutes } from "./features/bug-reports/bug-reports.routes";
 import { exportRoutes } from "./features/export/export.routes";
 import { importRoutes } from "./features/import/import.routes";
 import { locationsRoutes } from "./features/locations/locations.routes";
@@ -15,6 +17,7 @@ import type { Env } from "./types";
 export const app = new Hono<Env>();
 
 app.onError(errorHandler);
+app.use("*", applySecurityHeaders);
 app.use("/api/*", requestLogger);
 app.use("*", requireBasicAuth);
 
@@ -28,6 +31,7 @@ app.get("/api/health", (c) =>
 
 app.route("/api/parts", partsRoutes);
 app.route("/api/categories", categoriesRoutes);
+app.route("/api/bug-reports", bugReportsRoutes);
 app.route("/api/locations", locationsRoutes);
 app.route("/api/tags", tagsRoutes);
 app.route("/api/projects", projectsRoutes);
