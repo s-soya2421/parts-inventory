@@ -496,8 +496,8 @@ export class PartsRepository {
     return row.id;
   }
 
-  async update(id: number, input: PartRecordInput, tagIds: number[], movement?: StockMovementInput): Promise<void> {
-    const result = await this.db
+  async update(id: number, input: PartRecordInput, tagIds: number[]): Promise<void> {
+    const updateStatement = this.db
       .prepare(
         `UPDATE parts
          SET category_id = ?, model_number = ?, name = ?, description = ?, manufacturer = ?, footprint = ?,
@@ -523,16 +523,22 @@ export class PartsRepository {
         input.searchText,
         input.statusId ?? null,
         id,
-      )
-      .run();
+      );
 
-    if (result.meta.changes === 0) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
-    await this.db.batch([
+    const [, result] = await this.db.batch([
+      // Read the before-value inside the same transaction as the edit, so a
+      // concurrent stock operation cannot leave this movement with a stale value.
+      this.db.prepare(
+        `INSERT INTO stock_movements (part_id, movement_type, quantity_before, quantity_delta, quantity_after, reason, memo)
+         SELECT id, 'set', stock_quantity, ? - stock_quantity, ?, 'edit', 'Stock changed from edit form'
+         FROM parts WHERE id = ? AND stock_quantity != ?`,
+      ).bind(input.stockQuantity, input.stockQuantity, id, input.stockQuantity),
+      updateStatement,
       ...this.replaceAttributesStatements(id, input.attributes),
       ...this.replaceTagsStatements(id, tagIds),
       ...this.replaceAlternativesStatements(id, input.alternatives ?? []),
-      ...(movement ? [this.movementStatement(id, movement)] : []),
     ]);
+    if (result.meta.changes === 0) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
   }
 
   async archive(id: number): Promise<void> {
@@ -608,12 +614,20 @@ export class PartsRepository {
     await this.rebuildSearchTextForParts(ids);
   }
 
-  async updateStockWithMovement(partId: number, afterQuantity: number, movement: StockMovementInput): Promise<void> {
+  async updateStockWithMovement(partId: number, afterQuantity: number, movement: StockMovementInput): Promise<boolean> {
     const [result] = await this.db.batch([
-      this.db.prepare("UPDATE parts SET stock_quantity = ?, updated_at = datetime('now') WHERE id = ?").bind(afterQuantity, partId),
-      this.movementStatement(partId, movement),
+      this.db.prepare(
+        "UPDATE parts SET stock_quantity = ?, updated_at = datetime('now') WHERE id = ? AND stock_quantity = ?",
+      ).bind(afterQuantity, partId, movement.quantityBefore),
+      // changes() refers to the immediately preceding UPDATE in this atomic batch.
+      // A failed comparison must not add a phantom movement.
+      this.db.prepare(
+        `INSERT INTO stock_movements (part_id, movement_type, quantity_before, quantity_delta, quantity_after, reason, memo)
+         SELECT ?, ?, ?, ?, ?, ?, ? WHERE changes() = 1`,
+      ).bind(partId, movement.movementType, movement.quantityBefore, movement.quantityDelta,
+        movement.quantityAfter, movement.reason ?? null, movement.memo ?? null),
     ]);
-    if (result.meta.changes === 0) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
+    return result.meta.changes === 1;
   }
 
   async listMovements(partId: number): Promise<StockMovement[]> {

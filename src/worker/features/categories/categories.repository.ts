@@ -33,6 +33,15 @@ export class CategoriesRepository {
     return row ? mapCategory(row) : null;
   }
 
+  async findByName(name: string): Promise<Category | null> {
+    const { results } = await this.db.prepare("SELECT * FROM categories WHERE name = ? ORDER BY id LIMIT 2")
+      .bind(name).all<DbCategoryRow>();
+    if (results.length > 1) {
+      throw new AppError("AMBIGUOUS_CATEGORY", "Multiple categories have this name. Rename them before importing.", 409);
+    }
+    return results[0] ? mapCategory(results[0]) : null;
+  }
+
   async create(input: CategoryWriteInput): Promise<Category> {
     const slug = input.slug ?? slugify(input.name);
     const row = await this.db

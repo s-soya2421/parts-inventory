@@ -61,7 +61,7 @@ export class ImportService {
           manufacturer: row.manufacturer ?? null,
           caseNumber: row.case_number ?? null,
           memo: row.memo ?? null,
-          lowStockThreshold: row.low_stock_threshold,
+          lowStockThreshold: row.low_stock_threshold ?? 0,
           tagNames: this.parseTags(row.tags),
           attributes: this.parseAttributes(row.attributes_json),
           tagIds: [],
@@ -75,8 +75,24 @@ export class ImportService {
           }
           // 更新前の状態をスナップショットして取り消し可能にする
           const before = await this.partsService.getDetail(existing.id);
-          await this.partsService.update(existing.id, payload);
-          entries.push({ partId: existing.id, action: "update", beforeJson: JSON.stringify(toWriteInput(before)) });
+          const snapshot = toWriteInput(before);
+          await this.partsService.update(existing.id, {
+            ...snapshot,
+            ...payload,
+            // Omitted optional columns preserve existing values. Explicit nulls
+            // and empty lists still clear fields supported by the import format.
+            price: row.price === undefined ? snapshot.price : payload.price,
+            footprint: row.footprint === undefined ? snapshot.footprint : payload.footprint,
+            manufacturer: row.manufacturer === undefined ? snapshot.manufacturer : payload.manufacturer,
+            caseNumber: row.case_number === undefined ? snapshot.caseNumber : payload.caseNumber,
+            memo: row.memo === undefined ? snapshot.memo : payload.memo,
+            lowStockThreshold: row.low_stock_threshold === undefined ? snapshot.lowStockThreshold : payload.lowStockThreshold,
+            tagIds: row.tags === undefined ? snapshot.tagIds : payload.tagIds,
+            tagNames: row.tags === undefined ? snapshot.tagNames : payload.tagNames,
+            attributes: row.attributes_json === undefined ? snapshot.attributes : payload.attributes,
+            alternatives: snapshot.alternatives,
+          });
+          entries.push({ partId: existing.id, action: "update", beforeJson: JSON.stringify(snapshot) });
           updated += 1;
         } else {
           const detail = await this.partsService.create(payload);
@@ -150,8 +166,14 @@ export class ImportService {
   }
 
   private async ensureCategory(name: string) {
+    const existing = await this.categoriesRepository.findByName(name);
+    if (existing) return existing;
     const slug = slugify(name);
-    return (await this.categoriesRepository.findBySlug(slug)) ?? this.categoriesRepository.create({ name, slug });
+    const slugMatch = await this.categoriesRepository.findBySlug(slug);
+    if (slugMatch) {
+      throw new AppError("CATEGORY_SLUG_CONFLICT", "A different category already uses this slug. Use its exact name when importing.", 409);
+    }
+    return this.categoriesRepository.create({ name, slug });
   }
 
   private parseTags(value: ImportPartRow["tags"]): string[] {
@@ -197,6 +219,7 @@ function toWriteInput(part: PartDetail): PartWriteInput {
     datasheetUrl: part.datasheetUrl ?? null,
     memo: part.memo ?? null,
     lowStockThreshold: part.lowStockThreshold,
+    statusId: part.statusId ?? null,
     attributes: part.attributes.map((a) => ({
       key: a.key,
       label: a.label ?? null,
@@ -204,8 +227,8 @@ function toWriteInput(part: PartDetail): PartWriteInput {
       unit: a.unit ?? null,
       normalizedValue: a.normalizedValue ?? null,
     })),
-    tagIds: [],
-    tagNames: part.tags.map((t) => t.name),
+    tagIds: part.tags.map((t) => t.id),
+    tagNames: [],
     alternatives: part.alternatives?.map((a) => a.text) ?? [],
   };
 }

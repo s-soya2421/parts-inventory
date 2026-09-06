@@ -14,7 +14,7 @@ export const importPartRowSchema = z.object({
   manufacturer: z.string().trim().optional().nullable(),
   tags: z.union([z.string(), z.array(z.string())]).optional(),
   memo: z.string().trim().optional().nullable(),
-  low_stock_threshold: z.coerce.number().int().nonnegative().default(0),
+  low_stock_threshold: z.coerce.number().int().nonnegative().optional(),
   attributes_json: z.union([z.string(), z.record(z.string(), z.object({
     value: z.union([z.string(), z.number()]),
     unit: z.string().optional(),
