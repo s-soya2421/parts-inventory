@@ -41,13 +41,15 @@ Authorization: Basic <base64(user:password)>
 Basic認証必須。同originのフォーム送信または認証済みPOSTを受け付けます。ボディは不要。
 
 ```http
-HTTP/1.1 303 See Other
-Location: /
-Clear-Site-Data: "cookies"
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Basic realm="electronics-inventory", charset="UTF-8"
+Content-Type: text/html; charset=UTF-8
 Cache-Control: no-store
 ```
 
-対応ブラウザへHTTP認証情報・Cookieの削除を指示し、トップへ戻します。トップも認証必須です。GETではログアウトせず404。遷移先は固定で、クエリのURLを使用しません。ブラウザによる消去の制限は `operations.md` を参照してください。
+正しい認証情報にも、通常ログインと同一realmの401を返してブラウザのHTTP認証キャッシュの無効化を促します。認証画面が出た場合は再入力せず「キャンセル」を選びます。HTMLのmeta refreshで固定の `/` へ戻り、未対応時のリンクも用意しています。トップも認証必須なので、再び認証画面が出る場合があります。クエリの遷移先は採用しません。
+
+`Clear-Site-Data`、`Set-Cookie`、303は使いません。DBアクセスも行いません。Cookie・localStorage/sessionStorageは保持します。GETではログアウトせず404。外部originの認証済みPOSTは403、未認証POSTは通常の401です。HTTP認証キャッシュの消去とHTML遷移はブラウザ依存で、Safari実機の確認手順は `operations.md` を参照してください。
 
 ## Health
 

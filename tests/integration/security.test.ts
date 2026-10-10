@@ -90,13 +90,48 @@ describe("security boundaries", () => {
 });
 
 describe("logout", () => {
-  it("requests credential and cookie clearing without clearing preferences, then redirects to the fixed top page", async () => {
+  it("rejects valid cached credentials in the login realm and returns fixed top-page navigation", async () => {
+    const login = await client.raw("/", { headers: { authorization: "" } });
     const response = await client.raw("/api/logout?next=https://evil.example", { method: "POST", headers: { origin: "http://localhost", "content-type": "application/x-www-form-urlencoded" }, body: "" });
-    expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("/");
-    expect(response.headers.get("clear-site-data")).toBe('"cookies"');
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(login.headers.get("www-authenticate"));
+    expect(response.headers.get("www-authenticate")).toContain('realm="electronics-inventory"');
+    expect(response.headers.has("location")).toBe(false);
+    expect(response.headers.has("clear-site-data")).toBe(false);
+    expect(response.headers.has("set-cookie")).toBe(false);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.headers.has("www-authenticate")).toBe(false);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    const html = await response.text();
+    expect(html).toContain('<meta http-equiv="refresh" content="0;url=/">');
+    expect(html).toContain('href="/"');
+    expect(html).not.toContain("evil.example");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("inventory-pass");
+  });
+
+  it("never accesses the database or asset binding, including repeated valid credential submissions", async () => {
+    const env = {
+      BASIC_AUTH_USER: "inventory", BASIC_AUTH_PASSWORD: "inventory-pass",
+      get DB(): D1Database { throw new Error("Logout must not access D1"); },
+      get ASSETS(): Fetcher { throw new Error("Logout must not fetch assets"); },
+    };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await app.request("http://localhost/api/logout", {
+        method: "POST", headers: { origin: "http://localhost", authorization: authHeader() },
+      }, env);
+      expect(response.status).toBe(401);
+      expect(response.headers.get("content-type")).toContain("text/html");
+    }
+  });
+
+  it("keeps the top page and APIs protected after a logout challenge", async () => {
+    await client.raw("/api/logout", { method: "POST" });
+    for (const path of ["/", "/parts", "/api/health", "/api/export/parts"]) {
+      expect((await client.raw(path, { headers: { authorization: "" } })).status).toBe(401);
+    }
+    // Basic credentials are still valid server-side; logout only targets the
+    // browser cache and must not disable other users or change the password.
+    expect((await client.raw("/api/health")).status).toBe(200);
   });
 
   it("requires authentication and rejects cross-origin logout", async () => {

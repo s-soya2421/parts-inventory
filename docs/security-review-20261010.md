@@ -27,20 +27,13 @@ Reactの通常の文字列レンダリングを使用し、アプリソースに
 
 ## ログアウト
 
-ヘッダーとスマホメニューにフォームのログアウトボタンを設置。認証済みの同origin `POST /api/logout` に対して次を返す。
+旧方式の `Clear-Site-Data: "cookies"` と303リダイレクトでは、利用者のSafariで画面が戻るだけで認証状態が残るとの報告があったため変更した。
 
-```http
-HTTP/1.1 303 See Other
-Location: /
-Clear-Site-Data: "cookies"
-Cache-Control: no-store
-```
+認証済みの同origin `POST /api/logout` に、通常ログインと同一の `WWW-Authenticate: Basic realm="electronics-inventory", charset="UTF-8"` を付けた **401** を返す。ボタン押下時に認証画面のキャンセルを案内し、401のHTMLはmeta refreshで固定の `/` へ戻す。トップも認証対象。再入力時も401で、認証画面ではキャンセルが必要。外部originの認証済みPOSTは403、未認証POSTは通常の401、GETは404。クエリの遷移先は採用しない。
 
-トップもBasic認証対象。GETではログアウトせず404、外部originのPOSTは403、未認証POSTは401。クエリの遷移先を採用せず、常に `/` に戻す。
-localStorage/sessionStorageと保存済みテーマ・列順・インポート設定は削除しない。Cookieの消去指示は認証情報だけに限定できない。
+`Clear-Site-Data` と `Set-Cookie` は送らない。Cookie・localStorage/sessionStorage・保存済みテーマ・列順・インポート設定は削除しない。DBとASSETSへのアクセスを禁止するテストで、ログアウト処理がいずれも呼ばないことを確認する。
 
-**制約:** Basic認証キャッシュはブラウザ管理であり、アプリから完全消去を保証できない。仕様上はcookies指示にHTTP認証情報を含むが、Chromiumには未対応旨のメッセージがある。今回のChromium 153.0.8010.0のローカルHTTPS検証では、認証キャッシュ利用中のリロード→ログアウト→新しい認証要求・トップの401を観測し、Cookie消去を確認した。localStorage/sessionStorageは保持する。ただし内部の認証キャッシュが完全に消えた証明とは扱わない。
-全ブラウザで確実に失効させる要件を満たすには、サーバー側で失効可能なセッション認証への変更が必要。保存済みパスワードそのものは削除しない。別タブに既に表示された画面を自動的に隠す機能は含まない。
+**制約:** ブラウザの認証キャッシュへの働きかけであり、サーバー側の認証情報失効ではない。パスワードマネージャーの保存情報も削除しない。別タブの表示済み画面を自動的に隠さない。WebKitの公式401ログアウトテストを参照したが、Safari実機での成功を保証しない。対象Safariで再読み込み・APIアクセス時に再認証が必要になることを別途確認する。
 
 ## 残件・運用確認
 
@@ -49,7 +42,7 @@ localStorage/sessionStorageと保存済みテーマ・列順・インポート�
 - **ブラウザ差・本番配信。** Safari/Firefox/Android実機と公開ホストでの動作は未確認。本番のDB・secret・Cloudflare設定は変更していない。公開後は未認証のHTML、JS/CSS、API、exportが401になることを確認する。
 - **インポート/エクスポートの資源消費。** 修正版SheetJSでも任意の巨大・圧縮ファイルに対するブラウザの資源上限を保証しない。今回のサイズ制限はAPIのJSONボディ対象。大量データでのexport負荷試験は未実施。
 
-## 検証
+## 初回セキュリティ改修の検証（401方式への変更前）
 
 - `pnpm test`: web 76件 + integration 47件 = **123件成功**。
 - `pnpm build`: 型チェック・本番ビルド成功。約797 kBの単一JSに対する既存のchunk size警告あり。
@@ -60,7 +53,19 @@ localStorage/sessionStorageと保存済みテーマ・列順・インポート�
 - Chromium 153.0.8010.0、ローカルHTTPS、1440×900 / 390×844。PCヘッダーとスマホメニューのボタン表示、横方向のoverflowなし、ログアウトPOST/303、トップの再認証要求、Cookie消去とlocalStorage/sessionStorageの保持を確認。アプリのpageerrorは0。検証環境には日本語フォントがなく、スクリーンショットの日本語グリフは確認できていない。
 - 本番DBの書き換え、デプロイ、PRのマージは実施していない。
 
+## 401方式への変更後の検証
+
+- 変更後のテスト: **127件（web 78 / integration 49）成功**。型チェック・本番ビルド成功。lint errors 0、既存warnings 31。依存・lockfileは今回変更していない。
+- 通常版の実アプリ画面をLinuxのPlaywright WebKit 26.5で操作（ローカルHTTP、テスト用SQLite/D1アダプター、PC 1440×900 / モバイル390×844）。両方でボタン押下 → 認証付きPOSTの401 → 認証ヘッダーなしのトップGETの401 → 再読み込みも401 → `/api/health` も401を確認。最初の案内をキャンセルした場合はPOSTされない。Cookie・localStorage・sessionStorageの保持、pageerror 0も確認。
+- ブラウザ検証で資格情報を常時注入する `httpCredentials` 設定は使わず、初回ログインで形成されたキャッシュを確認した。HTTP認証要求への応答は自動化環境が処理するため、Safariのネイティブ認証ダイアログを人がキャンセルする操作そのものの検証ではない。Safari実機・HTTPSの公開ホストは未検証。
+
+- HTTP認証領域の一致、認証済みPOSTも401となること、DB・ASSETSへアクセスしないこと、固定のトップ遷移、外部origin拒否、ログアウト後の認証保護、案内キャンセル時にPOSTしないことを回帰テストで確認。
+- Cookie消去を検証した上記の初回結果は旧方式のもの。現在の方式はCookieを保持する。
+- ブラウザ検証はローカル環境の実アプリ画面とテスト用DBを使う。Safari実機・公開ホストは未検証。
+
 ## 参照
+
+- [WebKit公式: 401によるHTTP認証キャッシュ無効化テスト](https://github.com/WebKit/WebKit/blob/main/LayoutTests/http/tests/security/401-logout/401-logout.py)
 
 - [Cloudflare: Workerを静的ファイルより先に実行する設定](https://developers.cloudflare.com/workers/static-assets/routing/worker-script/)
 - [W3C: Clear Site Data](https://www.w3.org/TR/clear-site-data/)

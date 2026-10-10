@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { LogoutButton } from "./LogoutButton";
 import { THEME_PALETTES, applyMode, applyPalette, getStoredMode, getStoredPalette, type ThemeMode, type ThemePalette } from "../../lib/theme";
 
 const navItems = [
@@ -144,9 +145,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
             <Link className="toolbar-icon" title="設定" aria-label="設定" to="/settings">{"⚙︎"}</Link>
             <button className="toolbar-icon" title="ヘルプ" aria-label="ヘルプ" onClick={() => setIsHelpOpen(true)}>?</button>
-            <form method="post" action="/api/logout">
-              <button type="submit" className="rounded px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100">ログアウト</button>
-            </form>
+            <LogoutButton className="rounded px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100" />
           </div>
         </div>
       </header>
@@ -199,9 +198,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 ))}
               </div>
             )}
-            <form method="post" action="/api/logout">
-              <button type="submit" className="w-full rounded px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100">ログアウト</button>
-            </form>
+            <LogoutButton className="w-full rounded px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100" />
           </aside>
         </div>
       )}

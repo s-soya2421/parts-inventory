@@ -2,12 +2,13 @@ import { createMiddleware } from "hono/factory";
 import type { Env } from "../types";
 
 const REALM = "electronics-inventory";
+export const BASIC_AUTH_CHALLENGE = `Basic realm="${REALM}", charset="UTF-8"`;
 
 function unauthorized() {
   return new Response("Authentication required.", {
     status: 401,
     headers: {
-      "www-authenticate": `Basic realm="${REALM}", charset="UTF-8"`,
+      "www-authenticate": BASIC_AUTH_CHALLENGE,
     },
   });
 }

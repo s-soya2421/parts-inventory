@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import { errorHandler } from "./middleware/error-handler";
-import { requireBasicAuth } from "./middleware/basic-auth";
+import { BASIC_AUTH_CHALLENGE, requireBasicAuth } from "./middleware/basic-auth";
 import { requestLogger } from "./middleware/request-logger";
 import { privateResponses, requireSameOrigin } from "./middleware/security";
 import { categoriesRoutes } from "./features/categories/categories.routes";
@@ -44,12 +44,22 @@ app.use("/api/*", bodyLimit({
   onError: (c) => c.json({ error: { code: "PAYLOAD_TOO_LARGE", message: "Request body must be at most 5 MiB." } }, 413),
 }));
 
-// A normal form navigation lets the browser process Clear-Site-Data before
-// following the redirect. The cookies directive also clears HTTP auth credentials
-// in supporting browsers; JavaScript cannot directly clear the Basic auth cache.
+// Reject even valid credentials for the SAME protection space. A 303 alone does
+// not invalidate the browser's Basic auth cache. The user must cancel any native
+// authentication prompt; after cancellation the HTML returns them to the top.
+// This is browser-dependent, not server-side revocation. Do not clear cookies or
+// storage: those are unrelated to the HTTP authentication cache.
 app.post("/api/logout", (c) => {
-  c.header("Clear-Site-Data", '"cookies"');
-  return c.redirect("/", 303);
+  c.header("WWW-Authenticate", BASIC_AUTH_CHALLENGE);
+  return c.html(`<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0;url=/">
+<title>認証情報のリセット</title></head>
+<body><main><h1>認証情報のリセット</h1>
+<p>認証画面が表示されたら「キャンセル」を選んでください。</p>
+<p>トップページに戻ります。自動で戻らない場合は<a href="/">トップページへ</a>。</p>
+</main></body></html>`, 401);
 });
 
 app.get("/api/health", (c) =>

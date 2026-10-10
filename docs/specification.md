@@ -124,7 +124,7 @@ MVPでは本格ログインは作らず、Basic認証で閲覧を制限する。
 - 認証情報が未設定または空の場合、APIは `BASIC_AUTH_NOT_CONFIGURED` を返す
 - 静的ファイルを含めてWorkerを先に実行し、未認証アクセスを拒否する
 - 更新APIは同originのみ。JSONボディ上限5 MiB（logoutフォームはJSON要件の例外）
-- ログアウトボタンは `POST /api/logout` にフォーム送信し、`Clear-Site-Data` で認証情報・Cookie消去を指示して `303` で `/` へ戻す。HTTPSと対応ブラウザが前提で、Basic認証キャッシュの消去はブラウザ実装に依存する
+- ログアウトボタンは認証画面のキャンセルを案内してから `POST /api/logout` にフォーム送信する。通常ログインと同じrealmの401で認証キャッシュの無効化を促し、キャンセル後にHTMLのmeta refreshで `/` へ戻す。Cookie・保存済み設定・DBは変更しない。キャッシュ無効化はブラウザ実装に依存し、Safari実機での検証が必要
 - 認証済みレスポンスは `no-store`。CSPとフレーム埋め込み防止ヘッダーを付与する
 
 本格ログインに移行する場合も、Route層へmiddlewareを差し替える構成にしておく。

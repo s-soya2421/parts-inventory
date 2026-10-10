@@ -170,7 +170,7 @@ pnpm wrangler deploy
 
 画面とAPI全体はBasic認証で保護されます。`POST` / `PUT` / `DELETE` も Basic 認証で保護されます。
 
-ヘッダーとスマホメニューからログアウトできます。`POST /api/logout` が対応ブラウザへBasic認証情報とCookieの消去を指示し、トップへ戻します。HTTPSが必要で、ブラウザによる制限と確認方法は [運用手順](docs/operations.md#logout-and-security-checks)、監査結果と残件は [セキュリティレビュー](docs/security-review-20261010.md) を参照してください。
+ヘッダーとスマホメニューからBasic認証キャッシュのリセットを試行できます。ログアウト時に認証画面が出たら「キャンセル」を選んでください。通常ログインと同じrealmの401を返し、キャンセル後にトップへ戻します。Cookie・保存済み設定・在庫データは削除しません。ブラウザによる制限と確認方法は [運用手順](docs/operations.md#logout-and-security-checks)、検証結果は [セキュリティレビュー](docs/security-review-20261010.md) を参照してください。
 
 ## Current MVP Scope
 
