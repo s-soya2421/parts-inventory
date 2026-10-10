@@ -15,7 +15,7 @@ pnpm install
 cp .dev.vars.example .dev.vars
 ```
 
-`BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` は画面とAPI全体を保護するBasic認証用。ローカル開発ではVite proxyが `.dev.vars` の値を使ってWorkerへ認証ヘッダーを付与する。未設定または空の場合、APIは `BASIC_AUTH_NOT_CONFIGURED` を返す。Cloudflare宛のsecret値は空にしないでください。
+`BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` は画面とAPI全体を保護するBasic認証用。Vite proxyは認証情報を自動付与しないため、Vite経由では先に `http://localhost:5173/api/health` を開き、ブラウザのBasic認証でログインする。未設定または空の場合は `BASIC_AUTH_NOT_CONFIGURED` を返す。Cloudflare宛のsecret値は空にしないでください。
 
 ## D1 Creation
 
@@ -116,3 +116,15 @@ Basic認証なしでは `401` になり、正しいBasic認証付きで `GET` �
 - 画面と閲覧APIはBasic認証で保護する。本格ログインは未実装。
 - D1のバックアップ用途として `GET /api/export/parts?format=json&mode=raw` を使う。
 - PDFの日本語フォント埋め込みは未対応。日本語を含む外部提出用帳票では出力確認を行う。
+
+## Logout and Security Checks
+
+- `assets.run_worker_first = true` を維持する。静的ファイル・SPAの画面遷移もWorkerの認証処理を通すために必須。
+- ヘッダーとスマホメニューのログアウトは `POST /api/logout` をフォーム送信する。レスポンスの `Clear-Site-Data: "cookies"` が認証情報とCookieの消去を指示し、`303 Location: /` でトップへ戻す。トップにもBasic認証があるため、対応ブラウザでは再度認証ダイアログが表示される。
+- 認証情報消去にはHTTPSと対応ブラウザが必要。Basic認証キャッシュをJavaScriptで直接消すAPIはなく、すべてのブラウザでの消去を保証するものではない。Chromium 153のローカル検証では再認証要求を確認したが、HTTP認証キャッシュ消去が未対応とのコンソールメッセージも出たため、完全消去の証明とは扱わない。未対応・旧ブラウザではサイトデータの手動削除が必要。全ブラウザで確実なログアウトが必要なら失効可能なサーバーセッション認証へ移行する。
+- 保存済みテーマ・列順・インポート設定とlocalStorage/sessionStorageは残す。`cookies` 指示はブラウザによって登録可能ドメイン内のCookieにも及ぶため、他アプリとCookieを共有しない専用ホストで運用する。別タブに既に表示中の画面を自動的に隠す機能は含まない。
+- 認証済みレスポンス、エクスポート、認証エラーは `Cache-Control: no-store`。HTMLにはCSP・クリックジャッキング対策・`nosniff` を付与する。外部画像はHTTPSのみ許可する。
+- 更新APIでは別originの `Origin`、`Sec-Fetch-Site: cross-site/same-site` を拒否する。ボディ付きAPIはJSONを要求し、5 MiBまでに制限する（logoutの同originフォームは例外）。ヘッダーなしの認証済みCLIリクエストは利用可能。
+- 本番ホストで未認証の `/`、`/parts`、`/assets/...`、`/api/health` がすべて401になることを確認する。本番に対する確認は読取リクエストだけにする。
+- `pnpm audit` は開発依存も含める。`pnpm audit --prod` も確認する。残る開発依存の問題は `docs/security-review-20261010.md` に記録する。
+- SheetJSは公式CDNの固定バージョンを使用する。`pnpm-lock.yaml` のintegrityを維持し、`pnpm install --frozen-lockfile` で再現する。脆弱なnpm版 `xlsx 0.18.5` に戻さない。

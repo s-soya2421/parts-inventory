@@ -87,7 +87,7 @@ MVPではカテゴリ別ヘッダを `export-schemas.ts` でコード管理す�
 
 ## Frontend
 
-React Router を利用し、検索条件はURLクエリに持たせる。APIクライアントは認証ヘッダーを付与する。
+React Router を利用し、検索条件はURLクエリに持たせる。Basic認証情報はブラウザが送信し、APIクライアントには保存しない。
 
 画面:
 
@@ -122,5 +122,9 @@ MVPでは本格ログインは作らず、Basic認証で閲覧を制限する。
 - `POST` / `PUT` / `DELETE`: Basic認証で保護
 - Basic認証の正値: Workers環境変数 `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD`
 - 認証情報が未設定または空の場合、APIは `BASIC_AUTH_NOT_CONFIGURED` を返す
+- 静的ファイルを含めてWorkerを先に実行し、未認証アクセスを拒否する
+- 更新APIは同originのみ。JSONボディ上限5 MiB（logoutフォームはJSON要件の例外）
+- ログアウトボタンは `POST /api/logout` にフォーム送信し、`Clear-Site-Data` で認証情報・Cookie消去を指示して `303` で `/` へ戻す。HTTPSと対応ブラウザが前提で、Basic認証キャッシュの消去はブラウザ実装に依存する
+- 認証済みレスポンスは `no-store`。CSPとフレーム埋め込み防止ヘッダーを付与する
 
 本格ログインに移行する場合も、Route層へmiddlewareを差し替える構成にしておく。

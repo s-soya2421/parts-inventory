@@ -15,6 +15,11 @@ async function csvText(rowsByCategory: Record<string, ExportRow[]>): Promise<str
 }
 
 describe("CsvExporter", () => {
+  it.each(["=1+1", "+SUM(A1)", "-1+2", "@SUM(A1)", "\t=1+1", " \r\n=1+1"])("neutralizes formula text %s in cells and headers", async (value) => {
+    const text = await csvText({ a: [{ [value]: value, numeric: -12 }] });
+    expect(text).toContain("'" + value);
+    expect(text).toContain(",-12");
+  });
   it("prepends a BOM, uses CRLF line endings, and a trailing CRLF", async () => {
     const text = await csvText({ a: [{ name: "x" }] });
     expect(text.startsWith(BOM)).toBe(true);

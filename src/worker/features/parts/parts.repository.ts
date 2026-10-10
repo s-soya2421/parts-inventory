@@ -194,7 +194,7 @@ export class PartsRepository {
     // Default list order groups by status display order, then sorts parts by name within each status.
     // Parts without a status are grouped at the end. Explicit sort still uses the selected column(s).
     return filters.sort
-      ? `${(sortColumns[filters.sort] ?? ["p.updated_at"]).map((c) => `${c} ${direction}`).join(", ")}, p.id DESC`
+      ? `${(Object.hasOwn(sortColumns, filters.sort) ? sortColumns[filters.sort] : ["p.updated_at"]).map((c) => `${c} ${direction}`).join(", ")}, p.id DESC`
       : `(s.id IS NULL), s.sort_order ASC, s.name COLLATE NOCASE ASC, p.name COLLATE NOCASE ASC, p.model_number COLLATE NOCASE ASC, p.id DESC`;
   }
 

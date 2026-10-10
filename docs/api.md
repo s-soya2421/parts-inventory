@@ -34,6 +34,21 @@ Authorization: Basic <base64(user:password)>
 
 画面とAPI全体がBasic認証の対象です。認証情報が未設定または空の場合は `BASIC_AUTH_NOT_CONFIGURED` を返します。
 
+更新APIは同originから利用してください。別originの `Origin`、`Sec-Fetch-Site: cross-site/same-site` は403。ボディは `application/json`（logoutのフォームのみ例外）を要求し、それ以外は415。ボディ上限は5 MiBで、超過時は413です。認証済みCLIはOriginヘッダーなしでも利用できます。
+
+### POST /api/logout
+
+Basic認証必須。同originのフォーム送信または認証済みPOSTを受け付けます。ボディは不要。
+
+```http
+HTTP/1.1 303 See Other
+Location: /
+Clear-Site-Data: "cookies"
+Cache-Control: no-store
+```
+
+対応ブラウザへHTTP認証情報・Cookieの削除を指示し、トップへ戻します。トップも認証必須です。GETではログアウトせず404。遷移先は固定で、クエリのURLを使用しません。ブラウザによる消去の制限は `operations.md` を参照してください。
+
 ## Health
 
 ### GET `/api/health`

@@ -170,6 +170,8 @@ pnpm wrangler deploy
 
 画面とAPI全体はBasic認証で保護されます。`POST` / `PUT` / `DELETE` も Basic 認証で保護されます。
 
+ヘッダーとスマホメニューからログアウトできます。`POST /api/logout` が対応ブラウザへBasic認証情報とCookieの消去を指示し、トップへ戻します。HTTPSが必要で、ブラウザによる制限と確認方法は [運用手順](docs/operations.md#logout-and-security-checks)、監査結果と残件は [セキュリティレビュー](docs/security-review-20261010.md) を参照してください。
+
 ## Current MVP Scope
 
 - 部品一覧、詳細、登録、編集
