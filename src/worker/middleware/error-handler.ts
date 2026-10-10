@@ -6,7 +6,7 @@ function logServerError(error: unknown, c: Context<Env>) {
   const metadata = {
     event: "unhandled_server_error",
     method: c.req.method,
-    url: c.req.url,
+    path: new URL(c.req.url).pathname,
     clientIp: c.req.header("x-forwarded-for") ?? c.req.header("cf-connecting-ip") ?? "unknown",
   };
 
