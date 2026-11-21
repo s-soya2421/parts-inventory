@@ -145,71 +145,31 @@ export class ImportService {
     }
 
 
-    // Preflight all affected IDs before changing any rows.
-    const checked = new Set<number>();
+    // Revert entries in a SINGLE SQLite/D1 transaction, not one part at a time.
+    // Legacy snapshots and repeated part IDs cannot safely be auto-reverted.
+    if (found.entries.some((entry) => !entry.after_json)) {
+      throw new AppError("IMPORT_REVERT_UNVERIFIED", "Legacy import lacks verified snapshots.", 409);
+    }
+    const ids = new Set<number>();
     for (const entry of found.entries) {
-      if (checked.has(entry.part_id)) continue;
-      checked.add(entry.part_id);
-      if (!entry.after_json) {
-        throw new AppError("IMPORT_REVERT_UNVERIFIED", "Legacy batch lacks verified snapshots.", 409);
+      if (ids.has(entry.part_id)) {
+        throw new AppError(
+          "IMPORT_REVERT_DUPLICATE",
+          "The same part was imported more than once in this batch; automatic undo is unsafe.",
+          409,
+        );
       }
-      const current = await this.readCurrentWriteInput(entry.part_id);
-      const serialized = current ? JSON.stringify(current) : null;
-      if (serialized !== entry.after_json && serialized !== entry.before_json &&
-          !(entry.action === "create" && current === null)) {
-        throw new AppError("IMPORT_REVERT_CONFLICT", "Part was edited after import; revert is unsafe.", 409);
-      }
+      ids.add(entry.part_id);
     }
 
-    let deleted = 0;
-    let restored = 0;
-    let failed = 0;
-    // Idempotent best-effort resume after partial operational failures.
-    for (const entry of found.entries) {
-      try {
-        if (!entry.after_json) throw new AppError("IMPORT_REVERT_UNVERIFIED", "Unverified batch.", 409);
-        const current = await this.readCurrentWriteInput(entry.part_id);
-        const serialized = current ? JSON.stringify(current) : null;
-        if (entry.action === "create") {
-          if (current === null) continue;
-          if (serialized !== entry.after_json) {
-            throw new AppError("IMPORT_REVERT_CONFLICT", "Part changed after import.", 409);
-          }
-          await this.partsService.delete(entry.part_id);
-          deleted++;
-        } else if (entry.before_json) {
-          if (serialized === entry.before_json) continue;
-          if (serialized !== entry.after_json) {
-            throw new AppError("IMPORT_REVERT_CONFLICT", "Part changed after import.", 409);
-          }
-          await this.partsService.update(entry.part_id, JSON.parse(entry.before_json) as PartWriteInput);
-          restored++;
-        }
-      } catch {
-        failed++;
-      }
-    }
-    if (failed > 0) {
-      throw new AppError(
-        "IMPORT_REVERT_PARTIAL_FAILURE",
-        "One or more entries could not be reverted; batch remains retryable.",
-        409,
-      );
-    }
-
-    await this.batchesRepository.markReverted(id);
-    return { deleted, restored, failed };
+    await this.batchesRepository.revertAtomically(id);
+    return {
+      deleted: found.entries.filter((entry) => entry.action === "create").length,
+      restored: found.entries.filter((entry) => entry.action === "update").length,
+      failed: 0,
+    };
   }
 
-
-  private async readCurrentWriteInput(id: number): Promise<PartWriteInput | null> {
-    try {
-      return toWriteInput(await this.partsService.getDetail(id));
-    } catch (error) {
-      if (error instanceof AppError && error.code === "PART_NOT_FOUND") return null;
-      throw error;
-    }
-  }
 
   private async ensureCategory(name: string) {
     const slug = slugify(name);

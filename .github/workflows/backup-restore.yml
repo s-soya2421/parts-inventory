@@ -1,0 +1,54 @@
+name: Disposable D1 backup and restore verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Complete SQL backup round trip (local D1 only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.0.0"
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build disposable local database
+        run: pnpm exec wrangler d1 migrations apply db-parts --local --persist-to .wrangler/state
+      - name: Insert fresh sentinel into local D1
+        run: |
+          pnpm exec wrangler d1 execute db-parts --local --persist-to .wrangler/state \
+            --command "INSERT INTO parts (category_id,model_number,name,stock_quantity) VALUES (2,'RESTORE-SENTINEL','Backup and restore marker',123)"
+      - name: Full local D1 SQL export (never remote)
+        run: |
+          pnpm exec wrangler d1 export db-parts --local \
+            --output "$RUNNER_TEMP/backup-original.sql"
+      - name: Verify restore into new SQLite database and compare all application tables
+        run: |
+          node scripts/verify-d1-backup.mjs \
+            --source-dir .wrangler/state --backup "$RUNNER_TEMP/backup-original.sql" \
+            --sentinel RESTORE-SENTINEL
+      - name: Prove a corrupted backup fails the verifier
+        run: |
+          node -e 'const fs=require("node:fs");const path=process.argv[1];const s=fs.readFileSync(path,"utf8");if(!s.includes("RESTORE-SENTINEL"))process.exit(2);fs.writeFileSync(path,s.replace("RESTORE-SENTINEL","CORRUPTED-SENTINEL"))' \
+            "$RUNNER_TEMP/backup-original.sql"
+          if node scripts/verify-d1-backup.mjs \
+            --source-dir .wrangler/state --backup "$RUNNER_TEMP/backup-original.sql" \
+            --sentinel RESTORE-SENTINEL; then
+            echo "ERROR: Tampered backup was not detected"
+            exit 1
+          fi
+          echo "Verified: corrupted backup rejected as expected"

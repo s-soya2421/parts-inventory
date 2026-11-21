@@ -126,7 +126,7 @@ Basic認証なしでは `401` になり、正しいBasic認証付きで `GET` �
 ## Operational Notes
 
 - 画面と閲覧APIはBasic認証で保護する。本格ログインは未実装。
-- D1のバックアップ用途として `GET /api/export/parts?format=json&mode=raw` を使う。
+- `GET /api/export/parts?format=json&mode=raw` は部品データのエクスポートであり、D1の完全なバックアップではない。完全復旧は `docs/disaster-recovery.md` を参照する。
 - PDFの日本語フォント埋め込みは未対応。日本語を含む外部提出用帳票では出力確認を行う。
 
 ## Logout and Security Checks
@@ -155,3 +155,11 @@ HTTP 401はこのログアウト処理の意図した応答。HTTP 401が返っ�
 ## v0.2.1 Upgrade Safety (proposed; do not auto-deploy)
 
 PR #7 adds two additive migrations: `0011_atomic_create_tokens.sql` and `0012_import_after_snapshots.sql`. Before any approved deployment, verify a D1 Time Travel recovery bookmark, apply migrations **before** the new Worker, and inspect recent import/stock/CSV/API flows. Do not run remote migrations or restores automatically. Import batches predating post-import snapshots reject automatic revert with HTTP 409 rather than overwrite later edits.
+
+## PR②: Backup / Restore and Additional Migration Safety
+
+- Detailed recovery runbook: `docs/disaster-recovery.md`.
+- The disposable D1 round-trip job verifies a **local** SQL backup and restore only. It is **not** a successful remote Cloudflare restore test, and it does not guarantee zero downtime.
+- In addition to the v0.2.1 migrations listed above, this PR adds `0013_atomic_import_revert_guard.sql`. Review the applicable migration order and validate against a staging D1 before any approved production deployment.
+- Create and verify a Cloudflare D1 Time Travel recovery point before migration. Run remote migrations **before** deploying the matching Worker code, within a separately approved release procedure.
+- **Do not** export or restore the live D1 as part of normal deployment. Remote export can block database requests, and Time Travel restore can cancel in-flight queries.

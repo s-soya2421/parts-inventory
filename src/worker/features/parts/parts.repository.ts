@@ -570,46 +570,64 @@ export class PartsRepository {
     }
   }
 
+
   async bulkUpdate(ids: number[], data: Partial<DbPartRow>): Promise<void> {
     if (ids.length === 0) return;
-    const updates: string[] = [];
-    const params: D1BindValue[] = [];
-
-    const allowedColumns = new Set([
-      "category_id",
-      "manufacturer",
-      "footprint",
-      "location_id",
-      "case_number",
-      "low_stock_threshold",
-      "status_id",
-      "memo",
+    const allowed = new Set([
+      "category_id","manufacturer","footprint","location_id",
+      "case_number","low_stock_threshold","status_id","memo",
     ]);
-
-    for (const [key, value] of Object.entries(data)) {
-      if (!allowedColumns.has(key)) {
-        throw new AppError("INVALID_BULK_UPDATE_COLUMN", `Column '${key}' is not allowed for bulk update.`, 400);
-      }
-      updates.push(`${key} = ?`);
-      params.push(value as D1BindValue);
+    const values = Object.entries(data);
+    if (!values.length) return;
+    for (const [key] of values) {
+      if (!allowed.has(key)) throw new AppError("INVALID_BULK_UPDATE_COLUMN", "Column not allowed: " + key, 400);
     }
-
-    if (updates.length === 0) return;
-
-
-    // Each D1 statement is limited to 100 bound parameters.
-    const chunkSize = Math.max(1, 100 - params.length);
-    for (let i = 0; i < ids.length; i += chunkSize) {
-      const group = ids.slice(i, i + chunkSize);
-      const marks = group.map(() => "?").join(", ");
-      await this.db.prepare(
-        "UPDATE parts SET " + updates.join(", ") +
-        ", updated_at = datetime('now') WHERE id IN (" + marks + ")",
-      ).bind(...params, ...group).run();
+    const idsJson = JSON.stringify([...new Set(ids)]);
+    const selection = "SELECT CAST(value AS INTEGER) FROM json_each(?)";
+    const binds = values.map(([, value]) => value as D1BindValue);
+    const statements: D1PreparedStatement[] = [];
+    if (data.category_id !== undefined) {
+      statements.push(this.db.prepare(
+        "DELETE FROM part_attribute_values WHERE part_id IN (" + selection + ")",
+      ).bind(idsJson));
     }
-    await this.rebuildSearchTextForParts(ids);
+    statements.push(this.db.prepare(
+      "UPDATE parts SET " + values.map(([key]) => key + "=?").join(",") +
+      ", updated_at=datetime('now') WHERE id IN (" + selection + ")",
+    ).bind(...binds, idsJson));
+    if (data.category_id !== undefined) {
+      // Preserve ALL raw attributes; only remap typed values whose keys exist
+      // in the destination category. Never leave foreign-category typed rows.
+      statements.push(this.db.prepare(
+        "INSERT OR IGNORE INTO part_attribute_values " +
+        "(part_id,attribute_definition_id,value_text,value_number,unit,display_value) " +
+        "SELECT pa.part_id,d.id,pa.value,CASE WHEN pa.value NOT GLOB '*[^0-9.eE+-]*' " +
+        "AND pa.value GLOB '*[0-9]*' THEN CAST(pa.value AS REAL) ELSE NULL END, " +
+        "pa.unit,pa.value || coalesce(pa.unit,'') FROM part_attributes pa " +
+        "JOIN parts p ON p.id=pa.part_id JOIN attribute_definitions d " +
+        "ON d.category_id=p.category_id AND d.key=pa.key " +
+        "WHERE pa.part_id IN (" + selection + ")",
+      ).bind(idsJson));
+    }
+    statements.push(this.db.prepare(
+      "UPDATE parts SET search_text=lower(" +
+      "coalesce(model_number,'') || ' ' || coalesce(name,'') || ' ' || " +
+      "coalesce(description,'') || ' ' || coalesce(manufacturer,'') || ' ' || " +
+      "coalesce(footprint,'') || ' ' || coalesce(case_number,'') || ' ' || " +
+      "coalesce((SELECT l.name FROM locations l WHERE l.id=parts.location_id),'') || ' ' || " +
+      "coalesce(memo,'') || ' ' || " +
+      "coalesce((SELECT c.name FROM categories c WHERE c.id=parts.category_id),'') || ' ' || " +
+      "coalesce((SELECT group_concat(t.name,' ') FROM part_tags pt " +
+      "JOIN tags t ON t.id=pt.tag_id WHERE pt.part_id=parts.id),'') || ' ' || " +
+      "coalesce((SELECT group_concat(pa.key || ' ' || coalesce(pa.label,'') || ' ' || " +
+      "pa.value || ' ' || coalesce(pa.unit,''),' ') FROM part_attributes pa " +
+      "WHERE pa.part_id=parts.id),'')" +
+      ") WHERE id IN (" + selection + ")",
+    ).bind(idsJson));
+    // A single transaction also covers category/typed-value remapping.
+    // SQL bind count stays constant even for hundreds of selected IDs.
+    await this.db.batch(statements);
   }
-
 
   // A D1 batch executes both statements within one transaction. The movement
   // captures the current stock BEFORE an atomic SQL update, not a stale JS read.

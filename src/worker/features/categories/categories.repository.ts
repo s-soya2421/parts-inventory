@@ -109,68 +109,101 @@ export class CategoriesRepository {
     return results.map(mapAttributeDefinition);
   }
 
-  async updateAttributeDefinitions(categoryId: number, inputs: AttributeDefinitionInput[]): Promise<void> {
-    const statements: D1PreparedStatement[] = [];
 
-    // Delete attribute definitions that are not in the input list
-    const incomingIds = inputs.map((i) => i.id).filter((id): id is number => typeof id === "number");
-    if (incomingIds.length > 0) {
-      statements.push(
-        this.db
-          .prepare(
-            `DELETE FROM attribute_definitions
-             WHERE category_id = ? AND id NOT IN (${incomingIds.map(() => "?").join(",")})`,
-          )
-          .bind(categoryId, ...incomingIds),
-      );
-    } else {
-      statements.push(this.db.prepare("DELETE FROM attribute_definitions WHERE category_id = ?").bind(categoryId));
+  async updateAttributeDefinitions(categoryId: number, inputs: AttributeDefinitionInput[]): Promise<void> {
+    if (!(await this.findById(categoryId))) {
+      throw new AppError("CATEGORY_NOT_FOUND", "Category not found.", 404);
+    }
+    const existing = await this.listAttributeDefinitions(categoryId);
+    const byId = new Map(existing.map((item) => [item.id, item]));
+    const ids = inputs.flatMap((item) => item.id === undefined ? [] : [item.id]);
+    if (new Set(ids).size !== ids.length || ids.some((id) => !byId.has(id))) {
+      throw new AppError("INVALID_ATTRIBUTE_ID", "Unknown or duplicate attribute definition ID.", 400);
+    }
+    const existingKeys = new Set<string>();
+    for (const item of inputs) {
+      if (!item.key || existingKeys.has(item.key)) {
+        throw new AppError("DUPLICATE_ATTRIBUTE_KEY", "Attribute keys must be unique and nonempty.", 400);
+      }
+      existingKeys.add(item.key);
     }
 
-    for (const input of inputs) {
-      if (input.id) {
-        statements.push(
-          this.db
-            .prepare(
-              `UPDATE attribute_definitions
-               SET key = ?, label = ?, data_type = ?, unit = ?, group_name = ?, is_searchable = ?, sort_order = ?, updated_at = datetime('now')
-               WHERE id = ? AND category_id = ?`,
-            )
-            .bind(
-              input.key,
-              input.label,
-              input.dataType,
-              input.unit ?? null,
-              input.groupName ?? null,
-              input.isSearchable ? 1 : 0,
-              input.sortOrder,
-              input.id,
-              categoryId,
-            ),
-        );
-      } else {
-        statements.push(
-          this.db
-            .prepare(
-              `INSERT INTO attribute_definitions (
-                category_id, key, label, data_type, unit, group_name, is_searchable, sort_order
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .bind(
-              categoryId,
-              input.key,
-              input.label,
-              input.dataType,
-              input.unit ?? null,
-              input.groupName ?? null,
-              input.isSearchable ? 1 : 0,
-              input.sortOrder,
-            ),
+    // Check semantics in SQL under the same atomic batch as the DDL/DML.
+    // Deleting or renaming an in-use key could cascade typed values or strand
+    // raw attributes. Refuse the operation instead of silently dropping data.
+    const inputJson = JSON.stringify(inputs);
+    const oldIds = JSON.stringify(ids);
+    const allSql = [
+      "SELECT 1 FROM attribute_definitions d WHERE d.category_id=? AND (",
+      "(NOT EXISTS (SELECT 1 FROM json_each(?) j WHERE CAST(json_extract(j.value,'$.id') AS INTEGER)=d.id)",
+      "AND (EXISTS (SELECT 1 FROM part_attributes pa JOIN parts p ON p.id=pa.part_id",
+      "WHERE p.category_id=d.category_id AND pa.key=d.key)",
+      "OR EXISTS (SELECT 1 FROM part_attribute_values v WHERE v.attribute_definition_id=d.id)",
+      "OR EXISTS (SELECT 1 FROM category_list_headers h WHERE h.attribute_definition_id=d.id)))",
+      "OR EXISTS (SELECT 1 FROM json_each(?) j",
+      "WHERE CAST(json_extract(j.value,'$.id') AS INTEGER)=d.id AND (",
+      "(json_extract(j.value,'$.key') IS NOT d.key AND (",
+      "EXISTS (SELECT 1 FROM part_attributes pa JOIN parts p ON p.id=pa.part_id",
+      "WHERE p.category_id=d.category_id AND pa.key=d.key)",
+      "OR EXISTS (SELECT 1 FROM part_attribute_values v WHERE v.attribute_definition_id=d.id)))",
+      "OR (json_extract(j.value,'$.dataType') IS NOT d.data_type",
+      "AND EXISTS (SELECT 1 FROM part_attribute_values v WHERE v.attribute_definition_id=d.id))",
+      ")))",
+    ].join(" ");
+    const guard = [
+      "INSERT INTO attribute_change_guards (category_id, valid)",
+      "VALUES (?, CASE WHEN NOT EXISTS (" + allSql + ") THEN 1 ELSE 0 END)",
+    ].join(" ");
+    const inputColumns = ["key","label","data_type","unit","group_name","is_searchable","sort_order","updated_at"];
+    const inputValues = [
+      "json_extract(j.value,'$.key')", "json_extract(j.value,'$.label')",
+      "json_extract(j.value,'$.dataType')", "json_extract(j.value,'$.unit')",
+      "json_extract(j.value,'$.groupName')", "json_extract(j.value,'$.isSearchable')",
+      "json_extract(j.value,'$.sortOrder')", "datetime('now')",
+    ];
+    const statements: D1PreparedStatement[] = [
+      this.db.prepare(guard).bind(categoryId, categoryId, inputJson, inputJson),
+      this.db.prepare(
+        "DELETE FROM attribute_definitions WHERE category_id=? AND id NOT IN " +
+        "(SELECT CAST(value AS INTEGER) FROM json_each(?))",
+      ).bind(categoryId, oldIds),
+      this.db.prepare(
+        "UPDATE attribute_definitions SET (" + inputColumns.join(",") + ") = " +
+        "(SELECT " + inputValues.join(",") + " FROM json_each(?) j " +
+        "WHERE CAST(json_extract(j.value,'$.id') AS INTEGER)=attribute_definitions.id) " +
+        "WHERE category_id=? AND id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))",
+      ).bind(inputJson, categoryId, oldIds),
+      this.db.prepare(
+        "INSERT INTO attribute_definitions (category_id,key,label,data_type,unit,group_name,is_searchable,sort_order) " +
+        "SELECT ?, json_extract(j.value,'$.key'), json_extract(j.value,'$.label'), " +
+        "json_extract(j.value,'$.dataType'), json_extract(j.value,'$.unit'), " +
+        "json_extract(j.value,'$.groupName'), json_extract(j.value,'$.isSearchable'), " +
+        "json_extract(j.value,'$.sortOrder') FROM json_each(?) j " +
+        "WHERE json_type(j.value,'$.id') IS NULL",
+      ).bind(categoryId, inputJson),
+      this.db.prepare(
+        "INSERT OR IGNORE INTO part_attribute_values " +
+        "(part_id,attribute_definition_id,value_text,value_number,unit,display_value) " +
+        "SELECT pa.part_id,d.id,pa.value,CASE WHEN pa.value NOT GLOB '*[^0-9.eE+-]*' " +
+        "AND pa.value GLOB '*[0-9]*' THEN CAST(pa.value AS REAL) ELSE NULL END, " +
+        "pa.unit,pa.value || coalesce(pa.unit,'') FROM part_attributes pa " +
+        "JOIN parts p ON p.id=pa.part_id JOIN attribute_definitions d " +
+        "ON d.category_id=p.category_id AND d.key=pa.key WHERE p.category_id=?",
+      ).bind(categoryId),
+      this.db.prepare("DELETE FROM attribute_change_guards WHERE category_id=?").bind(categoryId),
+    ];
+    try {
+      await this.db.batch(statements);
+    } catch (error) {
+      if (/attribute_guard_valid|attribute_change_guards|CHECK constraint failed.*valid/i.test(String(error))) {
+        throw new AppError(
+          "ATTRIBUTE_IN_USE",
+          "Cannot delete, rename, or change the type of an attribute currently used by parts or list headers.",
+          409,
         );
       }
+      throw error;
     }
-
-    await this.db.batch(statements);
   }
 
   async listHeaders(categoryId: number): Promise<CategoryListHeader[]> {

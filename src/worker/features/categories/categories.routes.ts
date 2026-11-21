@@ -80,6 +80,7 @@ categoriesRoutes.put("/:id/attributes", async (c) => {
     return c.json({ data: { ok: true } });
   } catch (error) {
     console.error("Failed to update attribute definitions:", error);
+    if (error instanceof AppError) throw error;
     if (error instanceof Error) {
       throw new AppError("DB_ERROR", "仕様項目の保存中にエラーが発生しました。", 500);
     }
