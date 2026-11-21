@@ -43,13 +43,14 @@ export class CsvExporter {
   }
 
   private escapeCell(value: string | number | null): string {
-    const text = value == null ? "" : String(value);
-    // Spreadsheet applications can execute user-controlled formula-looking CSV cells.
-    // Apostrophe-prefix strings only; actual numeric values (including negatives) stay numeric.
-    const safe = typeof value === "string" && /^[\s\uFEFF]*[=+\-@]/.test(text) ? `\u0027${text}` : text;
-    if (/["\n\r,]/.test(safe)) {
-      return `"${safe.replace(/"/g, '""')}"`;
+    const raw = value == null ? "" : String(value);
+    // Quoting alone does not stop spreadsheet programs evaluating formulas.
+    // Keep genuine numeric cells numeric, but neutralize untrusted text/headers.
+    // eslint-disable-next-line no-control-regex -- spreadsheet importers may ignore leading control characters
+    const text = typeof value === "string" && /^[\s\u0000-\u001f\uFEFF]*[=+@-]/u.test(raw) ? `'${raw}` : raw;
+    if (/["\n\r,]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
     }
-    return safe;
+    return text;
   }
 }

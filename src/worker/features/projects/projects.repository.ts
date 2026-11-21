@@ -98,12 +98,17 @@ export class ProjectsRepository {
 
   async findExistingPartIds(ids: number[]): Promise<Set<number>> {
     if (ids.length === 0) return new Set<number>();
-    const placeholders = ids.map(() => "?").join(",");
-    const { results } = await this.db
-      .prepare(`SELECT id FROM parts WHERE id IN (${placeholders})`)
-      .bind(...ids)
-      .all<{ id: number }>();
-    return new Set(results.map((row) => row.id));
+    const existing = new Set<number>();
+    for (let i = 0; i < ids.length; i += 80) {
+      const chunk = ids.slice(i, i + 80);
+      const placeholders = chunk.map(() => "?").join(",");
+      const { results } = await this.db
+        .prepare(`SELECT id FROM parts WHERE id IN (${placeholders})`)
+        .bind(...chunk)
+        .all<{ id: number }>();
+      for (const row of results) existing.add(row.id);
+    }
+    return existing;
   }
 
   async addPart(projectId: number, part: ProjectPartPersist): Promise<void> {
@@ -136,49 +141,34 @@ export class ProjectsRepository {
       .run();
   }
 
+
   async create(
     fields: ProjectFieldsPersist,
     parts: ProjectPartPersist[],
     costs: ProjectCostPersist[],
   ): Promise<number> {
-    const row = await this.db
-      .prepare(
-        "INSERT INTO projects (name, description, image_url, reference_url) VALUES (?,?,?,?) RETURNING id",
-      )
-      .bind(
-        fields.name,
-        fields.description,
-        fields.imageUrl,
-        fields.referenceUrl,
-      )
-      .first<{ id: number }>();
-
-    if (!row)
-      throw new AppError(
-        "PROJECT_CREATE_FAILED",
-        "Failed to create project.",
-        500,
-      );
-
-    const statements: D1PreparedStatement[] = [
-      ...parts.map((part) =>
-        this.db
-          .prepare(
-            "INSERT INTO project_parts (project_id, part_id, quantity_required, memo) VALUES (?,?,?,?)",
-          )
-          .bind(row.id, part.partId, part.quantityRequired, part.memo),
-      ),
-      ...costs.map((cost) =>
-        this.db
-          .prepare(
-            "INSERT INTO project_costs (project_id, name, amount, memo, sort_order) VALUES (?,?,?,?,?)",
-          )
-          .bind(row.id, cost.name, cost.amount, cost.memo, cost.sortOrder),
-      ),
-    ];
-    if (statements.length > 0) await this.db.batch(statements);
-    return row.id;
+    const token = crypto.randomUUID();
+    const output = await this.db.batch([
+      this.db.prepare(
+        "INSERT INTO projects (name, description, image_url, reference_url, creation_token) " +
+        "VALUES (?, ?, ?, ?, ?) RETURNING id",
+      ).bind(fields.name, fields.description, fields.imageUrl, fields.referenceUrl, token),
+      ...parts.map((part) => this.db.prepare(
+        "INSERT INTO project_parts (project_id, part_id, quantity_required, memo) " +
+        "SELECT id, ?, ?, ? FROM projects WHERE creation_token = ?",
+      ).bind(part.partId, part.quantityRequired, part.memo, token)),
+      ...costs.map((cost) => this.db.prepare(
+        "INSERT INTO project_costs (project_id, name, amount, memo, sort_order) " +
+        "SELECT id, ?, ?, ?, ? FROM projects WHERE creation_token = ?",
+      ).bind(cost.name, cost.amount, cost.memo, cost.sortOrder, token)),
+    ]);
+    const id = Number((output[0]?.results?.[0] as { id?: number } | undefined)?.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new AppError("PROJECT_CREATE_FAILED", "Failed to create project.", 500);
+    }
+    return id;
   }
+
 
   async update(
     id: number,
@@ -186,40 +176,19 @@ export class ProjectsRepository {
     parts: ProjectPartPersist[],
     costs: ProjectCostPersist[],
   ): Promise<void> {
-    await this.db
-      .prepare(
-        "UPDATE projects SET name=?, description=?, image_url=?, reference_url=?, updated_at=datetime('now') WHERE id=?",
-      )
-      .bind(
-        fields.name,
-        fields.description,
-        fields.imageUrl,
-        fields.referenceUrl,
-        id,
-      )
-      .run();
-
     await this.db.batch([
-      this.db
-        .prepare("DELETE FROM project_parts WHERE project_id = ?")
-        .bind(id),
-      this.db
-        .prepare("DELETE FROM project_costs WHERE project_id = ?")
-        .bind(id),
-      ...parts.map((part) =>
-        this.db
-          .prepare(
-            "INSERT INTO project_parts (project_id, part_id, quantity_required, memo) VALUES (?,?,?,?)",
-          )
-          .bind(id, part.partId, part.quantityRequired, part.memo),
-      ),
-      ...costs.map((cost) =>
-        this.db
-          .prepare(
-            "INSERT INTO project_costs (project_id, name, amount, memo, sort_order) VALUES (?,?,?,?,?)",
-          )
-          .bind(id, cost.name, cost.amount, cost.memo, cost.sortOrder),
-      ),
+      this.db.prepare(
+        "UPDATE projects SET name=?, description=?, image_url=?, reference_url=?, " +
+        "updated_at=datetime('now') WHERE id=?",
+      ).bind(fields.name, fields.description, fields.imageUrl, fields.referenceUrl, id),
+      this.db.prepare("DELETE FROM project_parts WHERE project_id = ?").bind(id),
+      this.db.prepare("DELETE FROM project_costs WHERE project_id = ?").bind(id),
+      ...parts.map((part) => this.db.prepare(
+        "INSERT INTO project_parts (project_id, part_id, quantity_required, memo) VALUES (?,?,?,?)",
+      ).bind(id, part.partId, part.quantityRequired, part.memo)),
+      ...costs.map((cost) => this.db.prepare(
+        "INSERT INTO project_costs (project_id, name, amount, memo, sort_order) VALUES (?,?,?,?,?)",
+      ).bind(id, cost.name, cost.amount, cost.memo, cost.sortOrder)),
     ]);
   }
 

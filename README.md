@@ -22,7 +22,7 @@
 
 ## Prerequisites
 
-- Node.js（最近の LTS。例: 20 以上）
+- Node.js 24以上（SQLite統合テストの実行要件）
 - pnpm@10（このリポジトリは `package.json` の `packageManager` で `pnpm@10.0.0` をピン留め）
 - Cloudflare アカウント（D1作成・デプロイ用。下記「D1 Database」参照）
 
@@ -167,8 +167,28 @@ pnpm wrangler deploy
 - `GET /api/import/batches` （取り込み履歴：7日以内は取り消し可）
 - `POST /api/import/batches/:id/revert` （取り込みの取り消し：新規分は削除、更新分は取り込み前へ復元）
 - `GET /api/export/parts`
+- `POST /api/bug-reports` （不具合報告をD1に保存し、GitHub連携設定済みならIssueを作成）
 
 画面とAPI全体はBasic認証で保護されます。`POST` / `PUT` / `DELETE` も Basic 認証で保護されます。
+
+ヘッダーとスマホメニューからBasic認証キャッシュのリセットを試行できます。ログアウト時に認証画面が出たら「キャンセル」を選んでください。通常ログインと同じrealmの401を返し、キャンセル後にトップへ戻します。Cookie・保存済み設定・在庫データは削除しません。ブラウザによる制限と確認方法は [運用手順](docs/operations.md#logout-and-security-checks)、検証結果は [セキュリティレビュー](docs/security-review-20261010.md) を参照してください。
+
+## GitHub不具合報告連携
+
+不具合報告画面は常にD1に保存され、次のCloudflare Secretを設定するとGitHub Issueも作成します。
+
+```bash
+pnpm wrangler secret put GITHUB_TOKEN
+pnpm wrangler secret put GITHUB_REPOSITORY
+pnpm wrangler secret put GITHUB_ISSUE_ASSIGNEE
+```
+
+- `GITHUB_TOKEN`: 対象リポジトリの **Issues: Read and write** 権限だけを付与したfine-grained personal access token
+- `GITHUB_REPOSITORY`: `owner/repository` 形式。例: `s-soya2421/parts-inventory`
+- `GITHUB_ISSUE_ASSIGNEE`: 通知を受けるGitHubユーザー名。例: `s-soya2421`
+
+GitHub側の通知設定で「担当Issueのメール通知」を有効にすると、追加のメール送信サービスなしで通知できます。
+不具合報告APIは、同一接続元から1分に2件までに制限されます。パスワード、APIキー、個人情報などは報告に含めないでください。
 
 ## Current MVP Scope
 

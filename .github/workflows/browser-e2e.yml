@@ -1,0 +1,77 @@
+name: Headless browser E2E (Chromium + D1)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-e2e:
+    name: Chromium desktop + mobile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      E2E_BASIC_AUTH_USER: e2e
+      E2E_BASIC_AUTH_PASSWORD: test-only-secret
+      E2E_BASE_URL: http://127.0.0.1:8787
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - name: Install application dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install isolated Playwright runner
+        run: npm install --prefix e2e --no-audit --no-fund
+      - name: Install headless Chromium and system dependencies
+        run: ./e2e/node_modules/.bin/playwright install chromium --with-deps
+      - name: Build SPA and Worker code
+        run: pnpm build
+      - name: Prepare fresh local D1 using all migrations
+        run: pnpm exec wrangler d1 migrations apply db-parts --local --persist-to .wrangler/state
+      - name: Start local Cloudflare Worker with Basic Auth
+        run: |
+          printf 'BASIC_AUTH_USER=%s\nBASIC_AUTH_PASSWORD=%s\n' "$E2E_BASIC_AUTH_USER" "$E2E_BASIC_AUTH_PASSWORD" > .dev.vars
+          ./e2e/node_modules/.bin/wrangler dev --local --persist-to .wrangler/state --port 8787 --ip 127.0.0.1 > /tmp/worker-e2e.log 2>&1 &
+          echo "$!" > /tmp/worker-e2e.pid
+          for attempt in $(seq 1 30); do
+            if ! kill -0 "$(cat /tmp/worker-e2e.pid)" 2>/dev/null; then
+              echo "Wrangler exited before the health check was ready"
+              cat /tmp/worker-e2e.log
+              exit 1
+            fi
+            code="$(curl --silent --output /dev/null --write-out '%{http_code}' --user "$E2E_BASIC_AUTH_USER:$E2E_BASIC_AUTH_PASSWORD" http://127.0.0.1:8787/api/health || true)"
+            if [ "$code" = "200" ]; then
+              echo "Local Worker + D1 are ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/worker-e2e.log
+          exit 1
+      - name: Run desktop/mobile headless UI regressions
+        run: npm --prefix e2e test
+      - name: Upload browser traces, screenshots, videos and HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-artifacts
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Print Worker logs when E2E fails
+        if: failure()
+        run: cat /tmp/worker-e2e.log || true

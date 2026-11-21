@@ -2,6 +2,7 @@ export type ImportEntryInput = {
   partId: number;
   action: "create" | "update";
   beforeJson: string | null;
+  afterJson: string;
 };
 
 export type ImportBatchSummary = {
@@ -34,6 +35,7 @@ type DbImportEntryRow = {
   part_id: number;
   action: "create" | "update";
   before_json: string | null;
+  after_json: string | null;
 };
 
 export class ImportBatchesRepository {
@@ -59,8 +61,8 @@ export class ImportBatchesRepository {
       await this.db.batch(
         entries.map((entry) =>
           this.db
-            .prepare("INSERT INTO import_batch_entries (batch_id, part_id, action, before_json) VALUES (?, ?, ?, ?)")
-            .bind(row.id, entry.partId, entry.action, entry.beforeJson),
+            .prepare("INSERT INTO import_batch_entries (batch_id, part_id, action, before_json, after_json) VALUES (?, ?, ?, ?, ?)")
+            .bind(row.id, entry.partId, entry.action, entry.beforeJson, entry.afterJson),
         ),
       );
     }

@@ -85,3 +85,19 @@ describe("api-client cache", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("upstream JSON-only mutation compatibility", () => {
+  it.each([
+    ["restore part", () => apiClient.restorePart(123), "/api/parts/123/restore"],
+    ["undo import", () => apiClient.revertImportBatch(456), "/api/import/batches/456/revert"],
+  ])("%s sends application/json even with empty data", async (_name, invoke, url) => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true, deleted: 0, restored: 0, failed: 0 }));
+    await invoke();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(url);
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe("{}");
+    expect(new Headers(init.headers).get("content-type")).toBe("application/json");
+  });
+});

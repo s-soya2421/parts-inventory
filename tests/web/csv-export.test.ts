@@ -15,6 +15,11 @@ async function csvText(rowsByCategory: Record<string, ExportRow[]>): Promise<str
 }
 
 describe("CsvExporter", () => {
+  it.each(["=1+1", "+SUM(A1)", "-1+2", "@SUM(A1)", "\t=1+1", " \r\n=1+1"])("neutralizes formula text %s in cells and headers", async (value) => {
+    const text = await csvText({ a: [{ [value]: value, numeric: -12 }] });
+    expect(text).toContain("'" + value);
+    expect(text).toContain(",-12");
+  });
   it("prepends a BOM, uses CRLF line endings, and a trailing CRLF", async () => {
     const text = await csvText({ a: [{ name: "x" }] });
     expect(text.startsWith(BOM)).toBe(true);
@@ -43,6 +48,12 @@ describe("CsvExporter", () => {
   it("does not quote plain values", async () => {
     const text = await csvText({ a: [{ plain: "hello" }] });
     expect(text).toBe(`${BOM}plain\r\nhello\r\n`);
+  });
+
+  it("neutralizes spreadsheet formula prefixes", async () => {
+    const text = await csvText({ a: [{ formula: "=HYPERLINK(\"https://example.com\")", plus: "+1", minus: "-1", at: "@name" }] });
+    const lines = text.replace(BOM, "").trimEnd().split("\r\n");
+    expect(lines[1]).toBe(`"'=HYPERLINK(""https://example.com"")",'+1,'-1,'@name`);
   });
 
   it("unions columns across rows and fills missing cells with empty strings", async () => {

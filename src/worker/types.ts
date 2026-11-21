@@ -3,6 +3,9 @@ export type Env = {
     DB: D1Database;
     BASIC_AUTH_USER?: string;
     BASIC_AUTH_PASSWORD?: string;
+    GITHUB_TOKEN?: string;
+    GITHUB_REPOSITORY?: string;
+    GITHUB_ISSUE_ASSIGNEE?: string;
     ASSETS?: Fetcher;
   };
 };
@@ -38,6 +41,22 @@ export type DbLocationRow = {
   name: string;
   code: string;
   description: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbBugReportRow = {
+  id: number;
+  title: string;
+  description: string;
+  steps_to_reproduce: string | null;
+  expected_behavior: string | null;
+  actual_behavior: string | null;
+  severity: "low" | "normal" | "high" | "critical";
+  github_issue_number: number | null;
+  github_issue_url: string | null;
+  github_sync_status: "pending" | "created" | "failed";
+  github_sync_error: string | null;
   created_at: string;
   updated_at: string;
 };

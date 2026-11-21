@@ -18,6 +18,7 @@ import { StatusesPage } from "./routes/StatusesPage";
 import { FindPage } from "./routes/FindPage";
 import { CategorySettingsPage } from "./routes/CategorySettingsPage";
 import { AnalyticsPage } from "./routes/AnalyticsPage";
+import { BugReportPage } from "./routes/BugReportPage";
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/parts" replace />} />
         <Route path="/find" element={<FindPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/bug-report" element={<BugReportPage />} />
         <Route path="/parts" element={<PartsListPage />} />
         <Route path="/parts/new" element={<PartCreatePage />} />
         <Route path="/parts/:id" element={<PartDetailPage />} />

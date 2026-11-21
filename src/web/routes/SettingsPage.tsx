@@ -32,6 +32,12 @@ export function SettingsPage() {
       </section>
 
       <section className="panel-card grid gap-3 p-4">
+        <h2 className="text-sm font-semibold">サポート</h2>
+        <p className="text-xs leading-5 text-slate-500">不具合を見つけた場合は、再現手順を添えて報告できます。</p>
+        <Link className="btn justify-self-start" to="/bug-report">不具合を報告</Link>
+      </section>
+
+      <section className="panel-card grid gap-3 p-4">
         <h2 className="text-sm font-semibold">データ入出力</h2>
         <div className="flex flex-wrap gap-2">
           <Link className="btn" to="/import">JSONインポート</Link>

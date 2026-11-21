@@ -47,6 +47,9 @@ export class ImportService {
 
     for (const [index, row] of rows.entries()) {
       try {
+        // Parse untrusted row data before creating any master records.
+        const parsedTags = this.parseTags(row.tags);
+        const parsedAttributes = this.parseAttributes(row.attributes_json);
         const category = await this.ensureCategory(row.category);
         const existing = await this.partsRepository.findByModelNumberAndCategory(category.id, row.model_number);
         const rowMode = row.mode ?? mode;
@@ -55,15 +58,15 @@ export class ImportService {
           categoryId: category.id,
           modelNumber: row.model_number,
           name: row.name,
-          stockQuantity: row.stock_quantity,
+          stockQuantity: row.stock_quantity ?? 0,
           price: row.price ?? null,
           footprint: row.footprint ?? null,
           manufacturer: row.manufacturer ?? null,
           caseNumber: row.case_number ?? null,
           memo: row.memo ?? null,
-          lowStockThreshold: row.low_stock_threshold,
-          tagNames: this.parseTags(row.tags),
-          attributes: this.parseAttributes(row.attributes_json),
+          lowStockThreshold: row.low_stock_threshold ?? 0,
+          tagNames: parsedTags,
+          attributes: parsedAttributes,
           tagIds: [],
           alternatives: [],
         };
@@ -73,14 +76,37 @@ export class ImportService {
             skipped += 1;
             continue;
           }
-          // 更新前の状態をスナップショットして取り消し可能にする
+          // Update only fields supplied by the import. Never clear unrelated
+          // URLs, locations, status, alternatives, tags, or attributes.
           const before = await this.partsService.getDetail(existing.id);
-          await this.partsService.update(existing.id, payload);
-          entries.push({ partId: existing.id, action: "update", beforeJson: JSON.stringify(toWriteInput(before)) });
+          const previous = toWriteInput(before);
+          await this.partsService.update(existing.id, {
+            ...previous,
+            ...payload,
+            stockQuantity: row.stock_quantity ?? previous.stockQuantity,
+            lowStockThreshold: row.low_stock_threshold ?? previous.lowStockThreshold,
+            price: row.price === undefined ? previous.price : row.price,
+            caseNumber: row.case_number === undefined ? previous.caseNumber : row.case_number,
+            footprint: row.footprint === undefined ? previous.footprint : row.footprint,
+            manufacturer: row.manufacturer === undefined ? previous.manufacturer : row.manufacturer,
+            memo: row.memo === undefined ? previous.memo : row.memo,
+            attributes: row.attributes_json === undefined ? previous.attributes : payload.attributes,
+            tagNames: row.tags === undefined ? previous.tagNames : payload.tagNames,
+            tagIds: row.tags === undefined ? previous.tagIds : [],
+            alternatives: previous.alternatives,
+          });
+          const after = await this.partsService.getDetail(existing.id);
+          entries.push({
+            partId: existing.id, action: "update",
+            beforeJson: JSON.stringify(previous), afterJson: JSON.stringify(toWriteInput(after)),
+          });
           updated += 1;
         } else {
           const detail = await this.partsService.create(payload);
-          entries.push({ partId: detail.id, action: "create", beforeJson: null });
+          entries.push({
+            partId: detail.id, action: "create", beforeJson: null,
+            afterJson: JSON.stringify(toWriteInput(detail)),
+          });
           created += 1;
         }
       } catch (error) {
@@ -118,29 +144,55 @@ export class ImportService {
       );
     }
 
-    let deleted = 0;
-    let restored = 0;
-    let failed = 0;
 
+    // Preflight all affected IDs before changing any rows.
+    const checked = new Set<number>();
     for (const entry of found.entries) {
-      try {
-        if (entry.action === "create") {
-          await this.partsService.delete(entry.part_id);
-          deleted += 1;
-        } else if (entry.before_json) {
-          const before = JSON.parse(entry.before_json) as PartWriteInput;
-          await this.partsService.update(entry.part_id, before);
-          restored += 1;
-        }
-      } catch {
-        failed += 1;
+      if (checked.has(entry.part_id)) continue;
+      checked.add(entry.part_id);
+      if (!entry.after_json) {
+        throw new AppError("IMPORT_REVERT_UNVERIFIED", "Legacy batch lacks verified snapshots.", 409);
+      }
+      const current = await this.readCurrentWriteInput(entry.part_id);
+      const serialized = current ? JSON.stringify(current) : null;
+      if (serialized !== entry.after_json && serialized !== entry.before_json &&
+          !(entry.action === "create" && current === null)) {
+        throw new AppError("IMPORT_REVERT_CONFLICT", "Part was edited after import; revert is unsafe.", 409);
       }
     }
 
+    let deleted = 0;
+    let restored = 0;
+    let failed = 0;
+    // Idempotent best-effort resume after partial operational failures.
+    for (const entry of found.entries) {
+      try {
+        if (!entry.after_json) throw new AppError("IMPORT_REVERT_UNVERIFIED", "Unverified batch.", 409);
+        const current = await this.readCurrentWriteInput(entry.part_id);
+        const serialized = current ? JSON.stringify(current) : null;
+        if (entry.action === "create") {
+          if (current === null) continue;
+          if (serialized !== entry.after_json) {
+            throw new AppError("IMPORT_REVERT_CONFLICT", "Part changed after import.", 409);
+          }
+          await this.partsService.delete(entry.part_id);
+          deleted++;
+        } else if (entry.before_json) {
+          if (serialized === entry.before_json) continue;
+          if (serialized !== entry.after_json) {
+            throw new AppError("IMPORT_REVERT_CONFLICT", "Part changed after import.", 409);
+          }
+          await this.partsService.update(entry.part_id, JSON.parse(entry.before_json) as PartWriteInput);
+          restored++;
+        }
+      } catch {
+        failed++;
+      }
+    }
     if (failed > 0) {
       throw new AppError(
         "IMPORT_REVERT_PARTIAL_FAILURE",
-        "Import revert failed for one or more entries. The batch was not marked as reverted.",
+        "One or more entries could not be reverted; batch remains retryable.",
         409,
       );
     }
@@ -149,9 +201,21 @@ export class ImportService {
     return { deleted, restored, failed };
   }
 
+
+  private async readCurrentWriteInput(id: number): Promise<PartWriteInput | null> {
+    try {
+      return toWriteInput(await this.partsService.getDetail(id));
+    } catch (error) {
+      if (error instanceof AppError && error.code === "PART_NOT_FOUND") return null;
+      throw error;
+    }
+  }
+
   private async ensureCategory(name: string) {
     const slug = slugify(name);
-    return (await this.categoriesRepository.findBySlug(slug)) ?? this.categoriesRepository.create({ name, slug });
+    return (await this.categoriesRepository.findByName(name)) ??
+      (await this.categoriesRepository.findBySlug(slug)) ??
+      this.categoriesRepository.create({ name, slug });
   }
 
   private parseTags(value: ImportPartRow["tags"]): string[] {
@@ -197,6 +261,7 @@ function toWriteInput(part: PartDetail): PartWriteInput {
     datasheetUrl: part.datasheetUrl ?? null,
     memo: part.memo ?? null,
     lowStockThreshold: part.lowStockThreshold,
+    statusId: part.statusId ?? null,
     attributes: part.attributes.map((a) => ({
       key: a.key,
       label: a.label ?? null,

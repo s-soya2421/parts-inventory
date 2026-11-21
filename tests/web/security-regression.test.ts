@@ -98,8 +98,8 @@ describe("Cloudflare deployment security invariants", () => {
   it("runs Worker auth before static assets", () => {
     expect(assets).toMatch(/^\s*run_worker_first\s*=\s*true\s*$/m);
   });
-  it("preserves SPA fallback", () => {
-    expect(assets).toContain('not_found_handling = "single-page-application"');
+  it("does not enable asset-level SPA fallback that can override Basic Auth 401 responses", () => {
+    expect(assets).not.toContain('not_found_handling = "single-page-application"');
   });
   it("binds D1 to Worker rather than frontend", () => {
     expect(config).toContain('binding = "DB"');

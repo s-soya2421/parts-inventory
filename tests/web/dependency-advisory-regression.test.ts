@@ -24,7 +24,7 @@ describe("dependency advisory regression invariants", () => {
     expect(lock).toContain("dompurify@3.4.18:");
     expect(lock).not.toContain("dompurify@3.4.6:");
   });
-  it("releases the minor version after the regression gate", () => {
-    expect(pkg.version).toBe("0.2.0");
+  it("tracks the data integrity patch version after the regression gate", () => {
+    expect(pkg.version).toBe("0.2.1");
   });
 });

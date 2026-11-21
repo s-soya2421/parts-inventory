@@ -109,22 +109,22 @@ describe("PartsService", () => {
     expect(result).toMatchObject({ id: 101, name: "2.4GHz Module", movements: [] });
   });
 
-  it("throws NEGATIVE_STOCK when stock update would result in a negative quantity", async () => {
+
+  it("propagates atomic stock update guard errors", async () => {
+    const error = { code: "NEGATIVE_STOCK", status: 400 };
     const service = new PartsService(
-      createMock<PartsRepository>({ getById: vi.fn().mockResolvedValue({ id: 1, stockQuantity: 2 }) }),
+      createMock<PartsRepository>({ changeStockAtomically: vi.fn().mockRejectedValue(error) }),
       createMock<CategoriesRepository>({}),
       createMock<TagsRepository>({}),
     );
-
-    await expect(
-      service.changeStock(1, { type: "out", quantity: 3, reason: "use", memo: "test" }),
-    ).rejects.toMatchObject({ code: "NEGATIVE_STOCK", status: 400 });
+    await expect(service.changeStock(1, { type: "out", quantity: 3 }))
+      .rejects.toMatchObject(error);
   });
 
-  it("applies signed adjustment stock changes", async () => {
+  it("delegates signed adjustments to the atomic stock repository", async () => {
     const partsRepository = createMock<PartsRepository>({
-      getById: vi.fn().mockResolvedValue({ id: 1, stockQuantity: 10 }),
-      updateStockWithMovement: vi.fn().mockResolvedValue(undefined),
+      changeStockAtomically: vi.fn().mockResolvedValue(undefined),
+      getById: vi.fn().mockResolvedValue({ id: 1, stockQuantity: 7 }),
       listMovements: vi.fn().mockResolvedValue([]),
       listAlternatives: vi.fn().mockResolvedValue([]),
     });
@@ -133,25 +133,16 @@ describe("PartsService", () => {
       createMock<CategoriesRepository>({}),
       createMock<TagsRepository>({}),
     );
-
     await service.changeStock(1, { type: "adjustment", quantity: -3, reason: "count", memo: "inventory count" });
-
-    expect(partsRepository.updateStockWithMovement).toHaveBeenCalledWith(
-      1,
-      7,
-      expect.objectContaining({
-        movementType: "adjustment",
-        quantityDelta: -3,
-        quantityBefore: 10,
-        quantityAfter: 7,
-      }),
+    expect(partsRepository.changeStockAtomically).toHaveBeenCalledWith(
+      1, { type: "adjustment", quantity: -3, reason: "count", memo: "inventory count" },
     );
   });
 
-  it("allows setting stock quantity to zero", async () => {
+  it("supports an absolute stock set to zero through the atomic repository", async () => {
     const partsRepository = createMock<PartsRepository>({
-      getById: vi.fn().mockResolvedValue({ id: 1, stockQuantity: 10 }),
-      updateStockWithMovement: vi.fn().mockResolvedValue(undefined),
+      changeStockAtomically: vi.fn().mockResolvedValue(undefined),
+      getById: vi.fn().mockResolvedValue({ id: 1, stockQuantity: 0 }),
       listMovements: vi.fn().mockResolvedValue([]),
       listAlternatives: vi.fn().mockResolvedValue([]),
     });
@@ -160,18 +151,9 @@ describe("PartsService", () => {
       createMock<CategoriesRepository>({}),
       createMock<TagsRepository>({}),
     );
-
     await service.changeStock(1, { type: "set", quantity: 0, reason: "count", memo: "empty" });
-
-    expect(partsRepository.updateStockWithMovement).toHaveBeenCalledWith(
-      1,
-      0,
-      expect.objectContaining({
-        movementType: "set",
-        quantityDelta: -10,
-        quantityBefore: 10,
-        quantityAfter: 0,
-      }),
+    expect(partsRepository.changeStockAtomically).toHaveBeenCalledWith(
+      1, { type: "set", quantity: 0, reason: "count", memo: "empty" },
     );
   });
 });
