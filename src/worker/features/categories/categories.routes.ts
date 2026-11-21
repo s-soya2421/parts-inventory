@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "../../db/client";
 import { AppError } from "../../middleware/error-handler";
+import { parseJsonBody } from "../../middleware/request-body";
 import type { Env } from "../../types";
 import { slugify } from "../../utils";
 import { PartsRepository } from "../parts/parts.repository";
@@ -16,14 +17,14 @@ categoriesRoutes.get("/", async (c) => {
 });
 
 categoriesRoutes.post("/", async (c) => {
-  const input = categoryWriteSchema.parse(await c.req.json());
+  const input = categoryWriteSchema.parse(await parseJsonBody(c));
   const repository = new CategoriesRepository(getDb(c.env));
   return c.json({ data: await repository.create(input) }, 201);
 });
 
 categoriesRoutes.put("/:id", async (c) => {
   const id = Number(c.req.param("id"));
-  const input = categoryWriteSchema.parse(await c.req.json());
+  const input = categoryWriteSchema.parse(await parseJsonBody(c));
   const db = getDb(c.env);
   const repository = new CategoriesRepository(db);
   const category = await repository.update(id, input);
@@ -34,7 +35,8 @@ categoriesRoutes.put("/:id", async (c) => {
 categoriesRoutes.delete("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const repository = new CategoriesRepository(getDb(c.env));
-  await repository.delete(id);
+  const force = new URL(c.req.url).searchParams.get("force") === "true";
+  await repository.delete(id, { force });
   return c.json({ data: { ok: true } });
 });
 
@@ -46,7 +48,7 @@ categoriesRoutes.get("/:id/attributes", async (c) => {
 
 categoriesRoutes.put("/:id/attributes", async (c) => {
   const id = Number(c.req.param("id"));
-  const input = z.array(attributeDefinitionSchema).parse(await c.req.json());
+  const input = z.array(attributeDefinitionSchema).max(100).parse(await parseJsonBody(c));
   const db = getDb(c.env);
   const repository = new CategoriesRepository(db);
 
@@ -78,6 +80,7 @@ categoriesRoutes.put("/:id/attributes", async (c) => {
     return c.json({ data: { ok: true } });
   } catch (error) {
     console.error("Failed to update attribute definitions:", error);
+    if (error instanceof AppError) throw error;
     if (error instanceof Error) {
       throw new AppError("DB_ERROR", "仕様項目の保存中にエラーが発生しました。", 500);
     }
@@ -93,7 +96,7 @@ categoriesRoutes.get("/:id/headers", async (c) => {
 
 categoriesRoutes.put("/:id/headers", async (c) => {
   const id = Number(c.req.param("id"));
-  const input = z.array(categoryListHeaderSchema).parse(await c.req.json());
+  const input = z.array(categoryListHeaderSchema).max(100).parse(await parseJsonBody(c));
   const db = getDb(c.env);
   const repository = new CategoriesRepository(db);
 

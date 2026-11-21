@@ -49,3 +49,8 @@ pnpm-debug.log*
 Thumbs.db
 
 .pnpm-store
+
+# Never commit local D1 snapshots or exported SQL backups
+backups/
+backup-test/
+d1-export*.sql

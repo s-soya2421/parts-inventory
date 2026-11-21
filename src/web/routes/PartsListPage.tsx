@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { Category, CategoryListHeader, PartStatus, PartSummary, Tag } from "@shared/types";
+import { PartsSearchInput } from "../components/parts/PartsSearchInput";
 import { Skeleton } from "../components/ui/Skeleton";
 import { apiClient, type BulkUpdatePartsInput } from "../lib/api-client";
 import { getColumnOrderScope, getStoredColumnOrder, getStoredHiddenColumns, hasStoredHiddenColumns, removeStoredColumnOrder, setStoredColumnOrder, setStoredHiddenColumns } from "../lib/column-order-storage";
@@ -304,6 +305,7 @@ export function PartsListPage() {
   }, []);
 
   useEffect(() => {
+    let active = true;
     setIsLoading(true);
     setError("");
     const next = new URLSearchParams(searchParams);
@@ -316,22 +318,28 @@ export function PartsListPage() {
 
     Promise.all([apiClient.listParts(next), headerPromise])
       .then(([partData, headerData]) => {
+        if (!active) return;
         setParts(partData.items);
         setTotalCount(partData.total);
         setCustomHeaders(headerData);
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setIsLoading(false));
+      .catch((err) => { if (active) setError(err.message); })
+      .finally(() => { if (active) setIsLoading(false); });
 
     const recentParams = new URLSearchParams(next);
     recentParams.set("sort", "updatedAt");
     recentParams.set("direction", "desc");
     recentParams.set("page", "1");
     recentParams.set("pageSize", "5");
-    apiClient.listParts(recentParams).then((data) => setRecentParts(data.items)).catch(() => setRecentParts([]));
+    apiClient.listParts(recentParams)
+      .then((data) => { if (active) setRecentParts(data.items); })
+      .catch(() => { if (active) setRecentParts([]); });
 
     // 総在庫価格(ベータ): 現在のフィルタ条件全体での集計（ページ単位ではない）
-    apiClient.getPartsStats(next).then(setStats).catch(() => setStats(null));
+    apiClient.getPartsStats(next)
+      .then((data) => { if (active) setStats(data); })
+      .catch(() => { if (active) setStats(null); });
+    return () => { active = false; };
   }, [searchParams]);
 
   useEffect(() => {
@@ -957,7 +965,7 @@ export function PartsListPage() {
                 {tab.label}
               </button>
             ))}
-            <input className="h-8 min-w-[220px] rounded border border-slate-300 px-2 text-xs sm:min-w-[260px]" placeholder="型番・メーカー・メモ・属性を検索" value={searchParams.get("q") ?? ""} onChange={(event) => updateFilter("q", event.target.value)} />
+            <PartsSearchInput value={searchParams.get("q") ?? ""} onValueChange={(value) => updateFilter("q", value)} />
             <select className="h-8 rounded border border-slate-300 px-2 text-xs" value={searchParams.get("categoryId") ?? ""} onChange={(event) => updateFilter("categoryId", event.target.value)}>
               <option value="">全カテゴリ</option>
               {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}

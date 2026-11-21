@@ -33,10 +33,18 @@ export const partWriteSchema = z.object({
   memo: z.string().trim().optional().nullable(),
   lowStockThreshold: z.coerce.number().int().nonnegative().default(0),
   statusId: z.coerce.number().int().positive().optional().nullable(),
-  attributes: z.array(partAttributeInputSchema).default([]),
-  tagIds: z.array(z.coerce.number().int().positive()).default([]),
-  tagNames: z.array(z.string().trim().min(1)).default([]),
-  alternatives: z.array(z.string().trim().min(1)).default([]),
+  attributes: z.array(partAttributeInputSchema).max(100).default([]),
+  tagIds: z.array(z.coerce.number().int().positive()).max(100).default([]),
+  tagNames: z.array(z.string().trim().min(1)).max(100).default([]),
+  alternatives: z.array(z.string().trim().min(1)).max(100).default([]),
+}).superRefine((input, ctx) => {
+  const seen = new Set<string>();
+  for (const [index, attribute] of input.attributes.entries()) {
+    if (seen.has(attribute.key)) {
+      ctx.addIssue({ code: "custom", path: ["attributes", index, "key"], message: "Duplicate attribute key." });
+    }
+    seen.add(attribute.key);
+  }
 });
 
 export const stockChangeSchema = z
@@ -57,11 +65,11 @@ export const stockChangeSchema = z
   });
 
 export const bulkDeleteSchema = z.object({
-  ids: z.array(z.coerce.number().int().positive()),
+  ids: z.array(z.coerce.number().int().positive()).min(1).max(500),
 });
 
 export const bulkUpdateSchema = z.object({
-  ids: z.array(z.coerce.number().int().positive()),
+  ids: z.array(z.coerce.number().int().positive()).min(1).max(500),
   data: z.object({
     categoryId: z.coerce.number().int().positive().optional(),
     manufacturer: z.string().trim().optional().nullable(),

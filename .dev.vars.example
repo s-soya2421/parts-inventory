@@ -1,0 +1,3 @@
+# Local-only credentials; never commit real secrets
+BASIC_AUTH_USER=inventory
+BASIC_AUTH_PASSWORD=change-me-before-sharing

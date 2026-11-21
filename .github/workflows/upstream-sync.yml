@@ -1,0 +1,90 @@
+name: Propose upstream sync (fork only)
+
+on:
+  schedule:
+    - cron: "15 0 * * 1"
+  workflow_dispatch:
+
+# Never runs on the upstream owner's repo. Never pushes to main.
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: upstream-sync-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    if: github.repository == 's-soya2421/parts-inventory'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Check out fork default branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream changes into disposable proposal branch
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git fetch https://github.com/nyokkirokki/parts-inventory.git main
+          upstream_sha="$(git rev-parse FETCH_HEAD)"
+          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor "$upstream_sha" origin/main; then
+            echo "needs_pr=false" >> "$GITHUB_OUTPUT"
+            echo "Fork already contains upstream main." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C automation/upstream-sync origin/main
+
+          # Stop on conflicts. Never choose 'ours/theirs', never touch main.
+          if ! git merge --no-ff --no-edit "$upstream_sha"; then
+            git merge --abort || true
+            echo "::error::Upstream integration needs manual conflict resolution; no branch was pushed."
+            exit 1
+          fi
+
+          # Restrict force-with-lease to the dedicated automation branch.
+          git fetch origin '+refs/heads/automation/upstream-sync:refs/remotes/origin/automation/upstream-sync' || true
+          git push --force-with-lease origin HEAD:refs/heads/automation/upstream-sync
+          echo "needs_pr=true" >> "$GITHUB_OUTPUT"
+          echo "Prepared an upstream-sync PR; main remains unchanged." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open draft PR against fork main
+        if: steps.sync.outputs.needs_pr == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --head automation/upstream-sync --base main --state open --json number --jq '.[0].number // ""')"
+          if [[ -z "$existing" ]]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" \
+              --head automation/upstream-sync --base main --draft \
+              --title "chore: sync fork with nyokkirokki/main" \
+              --body "Automated upstream sync proposal. **Do not merge without green CI and human review.** No Cloudflare deploy or remote D1 migrations. If conflicts arise, the workflow fails without rewriting source files."
+          else
+            echo "Updated existing upstream sync PR #$existing"
+          fi
+
+      - name: Dispatch all four read-only verification workflows
+        # GITHUB_TOKEN-created PR checks may require an approval; explicit
+        # workflow_dispatch runs tests on the proposal branch regardless.
+        if: steps.sync.outputs.needs_pr == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow in ci.yml security-regression.yml browser-e2e.yml backup-restore.yml; do
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref automation/upstream-sync
+          done

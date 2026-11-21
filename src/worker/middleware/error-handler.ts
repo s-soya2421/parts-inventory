@@ -6,8 +6,8 @@ function logServerError(error: unknown, c: Context<Env>) {
   const metadata = {
     event: "unhandled_server_error",
     method: c.req.method,
-    url: c.req.url,
-    clientIp: c.req.header("x-forwarded-for") ?? c.req.header("cf-connecting-ip") ?? "unknown",
+    // Do not retain query parameters or client IP addresses in application logs.
+    path: new URL(c.req.url).pathname,
   };
 
   if (error instanceof Error) {
@@ -29,6 +29,7 @@ export class AppError extends Error {
     public code: string,
     message: string,
     public status = 400,
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -61,7 +62,7 @@ export const errorHandler: ErrorHandler<Env> = (error, c) => {
   }
 
   if (error instanceof AppError) {
-    return c.json({ error: { code: error.code, message: error.message } }, error.status as 400);
+    return c.json({ error: { code: error.code, message: error.message, ...(error.details !== undefined ? { details: error.details } : {}) } }, error.status as 400);
   }
 
   logServerError(error, c);

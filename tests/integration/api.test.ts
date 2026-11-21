@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestClient, type TestClient } from "./harness";
 
 let client: TestClient;
@@ -6,6 +6,10 @@ let client: TestClient;
 beforeEach(() => {
   // Fresh migrated in-memory DB (with seed data) per test.
   client = createTestClient();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("auth", () => {
@@ -26,6 +30,89 @@ describe("auth", () => {
     const { response, body } = await client.request("/api/health");
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
+  });
+
+  it("adds security headers and prevents API caching", async () => {
+    const response = await client.raw("/api/health");
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("rejects JSON request bodies larger than one megabyte", async () => {
+    const response = await client.raw("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "x".repeat(1_000_000) }),
+    });
+    expect(response.status).toBe(413);
+  });
+});
+
+describe("bug reports", () => {
+  const input = {
+    title: "検索結果が消える",
+    description: "部品一覧で検索を実行すると、期待していた結果が表示されません。",
+    stepsToReproduce: "1. 部品一覧を開く\n2. 検索欄に文字を入力する",
+    expectedBehavior: "一致する部品が表示される",
+    actualBehavior: "一覧が空になる",
+    severity: "high" as const,
+  };
+
+  it("saves the report even when GitHub is not configured", async () => {
+    const { response, body } = await client.request("/api/bug-reports", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+
+    expect(response.status).toBe(201);
+    expect(body.data).toMatchObject({ title: input.title, severity: "high", githubSyncStatus: "pending", githubIssueUrl: null });
+  });
+
+  it("creates and assigns a GitHub Issue when configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ number: 42, html_url: "https://github.com/s-soya2421/parts-inventory/issues/42" }), { status: 201 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    client = createTestClient({
+      GITHUB_TOKEN: "test-token",
+      GITHUB_REPOSITORY: "s-soya2421/parts-inventory",
+      GITHUB_ISSUE_ASSIGNEE: "s-soya2421",
+    });
+
+    const { response, body } = await client.request("/api/bug-reports", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+
+    expect(response.status).toBe(201);
+    expect(body.data).toMatchObject({ githubSyncStatus: "created", githubIssueNumber: 42, githubIssueUrl: "https://github.com/s-soya2421/parts-inventory/issues/42" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/s-soya2421/parts-inventory/issues",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+      title: `[Bug] ${input.title}`,
+      assignees: ["s-soya2421"],
+    });
+  });
+
+  it("limits repeated reports from the same client", async () => {
+    for (let count = 0; count < 2; count += 1) {
+      const { response } = await client.request("/api/bug-reports", {
+        method: "POST",
+        body: JSON.stringify({ ...input, title: `${input.title} ${count}` }),
+      });
+      expect(response.status).toBe(201);
+    }
+
+    const { response, body } = await client.request("/api/bug-reports", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBeTruthy();
+    expect(body.error.code).toBe("BUG_REPORT_RATE_LIMITED");
   });
 });
 
@@ -277,6 +364,122 @@ describe("attribute filter operators", () => {
       `/api/parts?categoryId=${categoryId}&attrs=${encodeURIComponent(JSON.stringify({ resistance: { op: "lte", val: "1000" } }))}`,
     );
     expect(lte.body.data.map((p: any) => p.modelNumber)).toEqual(["A-LOW"]);
+  });
+});
+
+describe("category deletion", () => {
+  it("deletes a category with no parts", async () => {
+    const category = await client.request("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "DelEmptyCat" }),
+    });
+    const categoryId = category.body.data.id;
+
+    const { response } = await client.request(`/api/categories/${categoryId}`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(200);
+
+    const categories = await client.request("/api/categories");
+    expect(categories.body.data.some((c: any) => c.id === categoryId)).toBe(false);
+  });
+
+  it("blocks deletion with an active part (409 CATEGORY_IN_USE)", async () => {
+    const category = await client.request("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "DelActiveCat" }),
+    });
+    const categoryId = category.body.data.id;
+    await client.request("/api/parts", {
+      method: "POST",
+      body: JSON.stringify({ categoryId, modelNumber: "S-1", name: "p", stockQuantity: 1 }),
+    });
+
+    const { response, body } = await client.request(`/api/categories/${categoryId}`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("CATEGORY_IN_USE");
+  });
+
+  it("blocks deletion when only archived parts remain (409 CATEGORY_HAS_ARCHIVED_PARTS)", async () => {
+    const category = await client.request("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "DelArchivedCat" }),
+    });
+    const categoryId = category.body.data.id;
+    const part = await client.request("/api/parts", {
+      method: "POST",
+      body: JSON.stringify({ categoryId, modelNumber: "S-1", name: "p", stockQuantity: 1 }),
+    });
+    const partId = part.body.data.id;
+    await client.request(`/api/parts/${partId}`, {
+      method: "DELETE",
+    });
+
+    const { response, body } = await client.request(`/api/categories/${categoryId}`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("CATEGORY_HAS_ARCHIVED_PARTS");
+  });
+
+  it("force=true deletes a category along with its archived parts", async () => {
+    const category = await client.request("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "DelForceArchivedCat" }),
+    });
+    const categoryId = category.body.data.id;
+    const part = await client.request("/api/parts", {
+      method: "POST",
+      body: JSON.stringify({ categoryId, modelNumber: "S-1", name: "p", stockQuantity: 1 }),
+    });
+    const partId = part.body.data.id;
+    await client.request(`/api/parts/${partId}`, {
+      method: "DELETE",
+    });
+
+    const { response, body } = await client.request(`/api/categories/${categoryId}`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("CATEGORY_HAS_ARCHIVED_PARTS");
+    expect(Array.isArray(body.error.details.archivedParts)).toBe(true);
+    expect(body.error.details.archivedParts.length).toBeGreaterThanOrEqual(1);
+    expect(body.error.details.archivedParts[0]).toHaveProperty("name");
+    expect(body.error.details.archivedParts[0]).toHaveProperty("modelNumber");
+
+    const force = await client.request(`/api/categories/${categoryId}?force=true`, {
+      method: "DELETE",
+    });
+    expect(force.response.status).toBe(200);
+
+    const categories = await client.request("/api/categories");
+    expect(categories.body.data.some((c: any) => c.id === categoryId)).toBe(false);
+
+    const archivedParts = await client.request(`/api/parts?categoryId=${categoryId}&archived=archived`);
+    expect(archivedParts.body.data.length).toBe(0);
+  });
+
+  it("force=true still blocks deletion when an active part exists (409 CATEGORY_IN_USE)", async () => {
+    const category = await client.request("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "DelForceActiveCat" }),
+    });
+    const categoryId = category.body.data.id;
+    await client.request("/api/parts", {
+      method: "POST",
+      body: JSON.stringify({ categoryId, modelNumber: "S-1", name: "p", stockQuantity: 1 }),
+    });
+
+    const { response, body } = await client.request(`/api/categories/${categoryId}?force=true`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("CATEGORY_IN_USE");
+
+    const parts = await client.request(`/api/parts?categoryId=${categoryId}`);
+    expect(parts.body.data.length).toBeGreaterThanOrEqual(1);
   });
 });
 

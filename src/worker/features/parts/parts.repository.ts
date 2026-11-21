@@ -2,7 +2,7 @@ import type { PartAlternative, PartAttribute, PartAttributeValue, PartsAnalytics
 import { AppError } from "../../middleware/error-handler";
 import type { DbPartAttributeRow, DbPartAttributeValueRow, DbPartRow, DbStockMovementRow, DbTagRow } from "../../types";
 import { mapAttribute, mapMovement, mapPart, mapPartAttributeValue, mapTag, toSearchText } from "../../utils";
-import type { PartWriteInput } from "./parts.schemas";
+import type { PartWriteInput, StockChangeInput } from "./parts.schemas";
 
 export type PartListFilters = {
   keyword?: string;
@@ -72,13 +72,13 @@ export class PartsRepository {
 
     if (filters.keyword) {
       conditions.push(
-        `(p.search_text LIKE ?
+        `(p.search_text LIKE ? OR l.name LIKE ?
           OR EXISTS (SELECT 1 FROM part_attributes pa WHERE pa.part_id = p.id AND (pa.key LIKE ? OR pa.label LIKE ? OR pa.value LIKE ? OR pa.unit LIKE ?))
           OR EXISTS (SELECT 1 FROM part_attribute_values pav JOIN attribute_definitions ad ON ad.id = pav.attribute_definition_id WHERE pav.part_id = p.id AND (ad.key LIKE ? OR ad.label LIKE ? OR pav.value_text LIKE ? OR pav.display_value LIKE ?))
         )`,
       );
       const keyword = `%${filters.keyword.toLowerCase()}%`;
-      params.push(keyword, keyword, keyword, keyword, keyword, keyword, keyword, keyword, keyword);
+      params.push(keyword, keyword, keyword, keyword, keyword, keyword, keyword, keyword, keyword, keyword);
     }
 
     if (filters.categoryId) {
@@ -194,7 +194,7 @@ export class PartsRepository {
     // Default list order groups by status display order, then sorts parts by name within each status.
     // Parts without a status are grouped at the end. Explicit sort still uses the selected column(s).
     return filters.sort
-      ? `${(sortColumns[filters.sort] ?? ["p.updated_at"]).map((c) => `${c} ${direction}`).join(", ")}, p.id DESC`
+      ? `${(Object.hasOwn(sortColumns, filters.sort) ? sortColumns[filters.sort] : ["p.updated_at"]).map((c) => `${c} ${direction}`).join(", ")}, p.id DESC`
       : `(s.id IS NULL), s.sort_order ASC, s.name COLLATE NOCASE ASC, p.name COLLATE NOCASE ASC, p.model_number COLLATE NOCASE ASC, p.id DESC`;
   }
 
@@ -234,7 +234,7 @@ export class PartsRepository {
       .bind(...pageParams)
       .all<DbPartRow>();
 
-    const items = await Promise.all(results.map((row) => this.hydratePart(row)));
+    const items = await this.hydrateParts(results);
     return { items, total };
   }
 
@@ -258,7 +258,7 @@ export class PartsRepository {
       .bind(...params)
       .all<DbPartRow>();
 
-    return Promise.all(results.map((row) => this.hydratePart(row)));
+    return this.hydrateParts(results);
   }
 
   async findByModelNumberAndCategory(categoryId: number, modelNumber: string): Promise<{ id: number; stockQuantity: number } | null> {
@@ -435,49 +435,55 @@ export class PartsRepository {
     return row ? this.hydratePart(row) : null;
   }
 
-  async create(input: PartRecordInput, tagIds: number[]): Promise<number> {
-    const row = await this.db
-      .prepare(
-        `INSERT INTO parts (
-          category_id, model_number, name, description, manufacturer, footprint, stock_quantity, price,
-          location_id, case_number, purchase_url, datasheet_url, memo, low_stock_threshold, search_text, status_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-      )
-      .bind(
-        input.categoryId,
-        input.modelNumber,
-        input.name,
-        input.description ?? null,
-        input.manufacturer ?? null,
-        input.footprint ?? null,
-        input.stockQuantity,
-        input.price ?? null,
-        input.locationId ?? null,
-        input.caseNumber ?? null,
-        input.purchaseUrl || null,
-        input.datasheetUrl || null,
-        input.memo ?? null,
-        input.lowStockThreshold,
-        input.searchText,
-        input.statusId ?? null,
-      )
-      .first<{ id: number }>();
 
-    if (!row) throw new AppError("PART_CREATE_FAILED", "Failed to create part.", 500);
-    await this.db.batch([
-      ...this.replaceAttributesStatements(row.id, input.attributes),
-      ...this.replaceTagsStatements(row.id, tagIds),
-      ...this.replaceAlternativesStatements(row.id, input.alternatives ?? []),
-      this.movementStatement(row.id, {
-        movementType: "initial",
-        quantityDelta: input.stockQuantity,
-        quantityBefore: 0,
-        quantityAfter: input.stockQuantity,
-        reason: "initial",
-        memo: "Initial stock",
+  async create(input: PartRecordInput, tagIds: number[]): Promise<number> {
+    // A request token lets all child inserts reference the new row in one
+    // atomic D1 batch without relying on last_insert_rowid() after child writes.
+    const token = crypto.randomUUID();
+    const statements: D1PreparedStatement[] = [
+      this.db.prepare(
+        "INSERT INTO parts (category_id, model_number, name, description, manufacturer, footprint, " +
+        "stock_quantity, price, location_id, case_number, purchase_url, datasheet_url, memo, " +
+        "low_stock_threshold, search_text, status_id, creation_token) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+      ).bind(input.categoryId, input.modelNumber, input.name, input.description ?? null,
+        input.manufacturer ?? null, input.footprint ?? null, input.stockQuantity, input.price ?? null,
+        input.locationId ?? null, input.caseNumber ?? null, input.purchaseUrl || null,
+        input.datasheetUrl || null, input.memo ?? null, input.lowStockThreshold,
+        input.searchText, input.statusId ?? null, token),
+      ...input.attributes.map((a) => this.db.prepare(
+        "INSERT INTO part_attributes (part_id, key, label, value, unit, normalized_value) " +
+        "SELECT id, ?, ?, ?, ?, ? FROM parts WHERE creation_token = ?",
+      ).bind(a.key, a.label ?? null, a.value, a.unit ?? null,
+        a.normalizedValue ?? a.value.toLowerCase(), token)),
+      ...input.attributes.map((a) => {
+        const numeric = Number(a.value);
+        return this.db.prepare(
+          "INSERT INTO part_attribute_values (part_id, attribute_definition_id, value_text, value_number, unit, display_value) " +
+          "SELECT p.id, ad.id, ?, ?, ?, ? FROM parts p " +
+          "JOIN attribute_definitions ad ON ad.category_id = p.category_id AND ad.key = ? " +
+          "WHERE p.creation_token = ?",
+        ).bind(a.value, Number.isFinite(numeric) ? numeric : null,
+          a.unit ?? null, a.value + (a.unit ?? ""), a.key, token);
       }),
-    ]);
-    return row.id;
+      ...[...new Set(tagIds)].map((tagId) => this.db.prepare(
+        "INSERT INTO part_tags (part_id, tag_id) SELECT id, ? FROM parts WHERE creation_token = ?",
+      ).bind(tagId, token)),
+      ...[...new Set(input.alternatives ?? [])].map((text, i) => this.db.prepare(
+        "INSERT INTO part_alternatives (part_id, text, sort_order) " +
+        "SELECT id, ?, ? FROM parts WHERE creation_token = ?",
+      ).bind(text, i, token)),
+      this.db.prepare(
+        "INSERT INTO stock_movements (part_id, movement_type, quantity_before, quantity_delta, quantity_after, reason, memo) " +
+        "SELECT id, 'initial', 0, ?, ?, 'initial', 'Initial stock' FROM parts WHERE creation_token = ?",
+      ).bind(input.stockQuantity, input.stockQuantity, token),
+    ];
+    const output = await this.db.batch(statements);
+    const id = Number((output[0]?.results?.[0] as { id?: number } | undefined)?.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new AppError("PART_CREATE_FAILED", "Failed to create part.", 500);
+    }
+    return id;
   }
 
   async ensureLocationByName(name: string): Promise<number> {
@@ -496,43 +502,25 @@ export class PartsRepository {
     return row.id;
   }
 
-  async update(id: number, input: PartRecordInput, tagIds: number[], movement?: StockMovementInput): Promise<void> {
-    const result = await this.db
-      .prepare(
-        `UPDATE parts
-         SET category_id = ?, model_number = ?, name = ?, description = ?, manufacturer = ?, footprint = ?,
-             stock_quantity = ?, price = ?, location_id = ?, case_number = ?, purchase_url = ?, datasheet_url = ?,
-             memo = ?, low_stock_threshold = ?, search_text = ?, status_id = ?, updated_at = datetime('now')
-         WHERE id = ?`,
-      )
-      .bind(
-        input.categoryId,
-        input.modelNumber,
-        input.name,
-        input.description ?? null,
-        input.manufacturer ?? null,
-        input.footprint ?? null,
-        input.stockQuantity,
-        input.price ?? null,
-        input.locationId ?? null,
-        input.caseNumber ?? null,
-        input.purchaseUrl || null,
-        input.datasheetUrl || null,
-        input.memo ?? null,
-        input.lowStockThreshold,
-        input.searchText,
-        input.statusId ?? null,
-        id,
-      )
-      .run();
 
-    if (result.meta.changes === 0) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
-    await this.db.batch([
+  async update(id: number, input: PartRecordInput, tagIds: number[], movement?: StockMovementInput): Promise<void> {
+    const [result] = await this.db.batch([
+      this.db.prepare(
+        "UPDATE parts SET category_id = ?, model_number = ?, name = ?, description = ?, manufacturer = ?, " +
+        "footprint = ?, stock_quantity = ?, price = ?, location_id = ?, case_number = ?, purchase_url = ?, " +
+        "datasheet_url = ?, memo = ?, low_stock_threshold = ?, search_text = ?, status_id = ?, " +
+        "updated_at = datetime('now') WHERE id = ?",
+      ).bind(input.categoryId, input.modelNumber, input.name, input.description ?? null,
+        input.manufacturer ?? null, input.footprint ?? null, input.stockQuantity, input.price ?? null,
+        input.locationId ?? null, input.caseNumber ?? null, input.purchaseUrl || null,
+        input.datasheetUrl || null, input.memo ?? null, input.lowStockThreshold, input.searchText,
+        input.statusId ?? null, id),
       ...this.replaceAttributesStatements(id, input.attributes),
       ...this.replaceTagsStatements(id, tagIds),
       ...this.replaceAlternativesStatements(id, input.alternatives ?? []),
       ...(movement ? [this.movementStatement(id, movement)] : []),
     ]);
+    if (result.meta.changes === 0) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
   }
 
   async archive(id: number): Promise<void> {
@@ -543,13 +531,16 @@ export class PartsRepository {
     if (result.meta.changes === 0) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
   }
 
+
   async bulkArchive(ids: number[]): Promise<void> {
-    if (ids.length === 0) return;
-    const placeholders = ids.map(() => "?").join(", ");
-    await this.db
-      .prepare(`UPDATE parts SET archived_at = datetime('now'), updated_at = datetime('now') WHERE id IN (${placeholders}) AND archived_at IS NULL`)
-      .bind(...ids)
-      .run();
+    for (let i = 0; i < ids.length; i += 80) {
+      const group = ids.slice(i, i + 80);
+      const marks = group.map(() => "?").join(", ");
+      await this.db.prepare(
+        "UPDATE parts SET archived_at = datetime('now'), updated_at = datetime('now') " +
+        "WHERE id IN (" + marks + ") AND archived_at IS NULL",
+      ).bind(...group).run();
+    }
   }
 
   async restore(id: number): Promise<void> {
@@ -561,59 +552,109 @@ export class PartsRepository {
   }
 
   async delete(id: number): Promise<void> {
+    const linked = await this.db.prepare("SELECT project_id FROM project_parts WHERE part_id = ? LIMIT 1")
+      .bind(id).first<{ project_id: number }>();
+    if (linked) {
+      throw new AppError("PART_IN_PROJECT", "Part is linked to a project; remove the link first.", 409);
+    }
     const result = await this.db.prepare("DELETE FROM parts WHERE id = ?").bind(id).run();
     if (result.meta.changes === 0) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
   }
 
+
   async bulkDelete(ids: number[]): Promise<void> {
-    if (ids.length === 0) return;
-    const placeholders = ids.map(() => "?").join(", ");
-    await this.db.prepare(`DELETE FROM parts WHERE id IN (${placeholders})`).bind(...ids).run();
+    for (let i = 0; i < ids.length; i += 80) {
+      const group = ids.slice(i, i + 80);
+      const marks = group.map(() => "?").join(", ");
+      await this.db.prepare("DELETE FROM parts WHERE id IN (" + marks + ")").bind(...group).run();
+    }
   }
+
 
   async bulkUpdate(ids: number[], data: Partial<DbPartRow>): Promise<void> {
     if (ids.length === 0) return;
-    const updates: string[] = [];
-    const params: D1BindValue[] = [];
-
-    const allowedColumns = new Set([
-      "category_id",
-      "manufacturer",
-      "footprint",
-      "location_id",
-      "case_number",
-      "low_stock_threshold",
-      "status_id",
-      "memo",
+    const allowed = new Set([
+      "category_id","manufacturer","footprint","location_id",
+      "case_number","low_stock_threshold","status_id","memo",
     ]);
-
-    for (const [key, value] of Object.entries(data)) {
-      if (!allowedColumns.has(key)) {
-        throw new AppError("INVALID_BULK_UPDATE_COLUMN", `Column '${key}' is not allowed for bulk update.`, 400);
-      }
-      updates.push(`${key} = ?`);
-      params.push(value as D1BindValue);
+    const values = Object.entries(data);
+    if (!values.length) return;
+    for (const [key] of values) {
+      if (!allowed.has(key)) throw new AppError("INVALID_BULK_UPDATE_COLUMN", "Column not allowed: " + key, 400);
     }
-
-    if (updates.length === 0) return;
-
-    const placeholders = ids.map(() => "?").join(", ");
-    params.push(...ids);
-
-    await this.db
-      .prepare(`UPDATE parts SET ${updates.join(", ")}, updated_at = datetime('now') WHERE id IN (${placeholders})`)
-      .bind(...params)
-      .run();
-
-    await this.rebuildSearchTextForParts(ids);
+    const idsJson = JSON.stringify([...new Set(ids)]);
+    const selection = "SELECT CAST(value AS INTEGER) FROM json_each(?)";
+    const binds = values.map(([, value]) => value as D1BindValue);
+    const statements: D1PreparedStatement[] = [];
+    if (data.category_id !== undefined) {
+      statements.push(this.db.prepare(
+        "DELETE FROM part_attribute_values WHERE part_id IN (" + selection + ")",
+      ).bind(idsJson));
+    }
+    statements.push(this.db.prepare(
+      "UPDATE parts SET " + values.map(([key]) => key + "=?").join(",") +
+      ", updated_at=datetime('now') WHERE id IN (" + selection + ")",
+    ).bind(...binds, idsJson));
+    if (data.category_id !== undefined) {
+      // Preserve ALL raw attributes; only remap typed values whose keys exist
+      // in the destination category. Never leave foreign-category typed rows.
+      statements.push(this.db.prepare(
+        "INSERT OR IGNORE INTO part_attribute_values " +
+        "(part_id,attribute_definition_id,value_text,value_number,unit,display_value) " +
+        "SELECT pa.part_id,d.id,pa.value,CASE WHEN pa.value NOT GLOB '*[^0-9.eE+-]*' " +
+        "AND pa.value GLOB '*[0-9]*' THEN CAST(pa.value AS REAL) ELSE NULL END, " +
+        "pa.unit,pa.value || coalesce(pa.unit,'') FROM part_attributes pa " +
+        "JOIN parts p ON p.id=pa.part_id JOIN attribute_definitions d " +
+        "ON d.category_id=p.category_id AND d.key=pa.key " +
+        "WHERE pa.part_id IN (" + selection + ")",
+      ).bind(idsJson));
+    }
+    statements.push(this.db.prepare(
+      "UPDATE parts SET search_text=lower(" +
+      "coalesce(model_number,'') || ' ' || coalesce(name,'') || ' ' || " +
+      "coalesce(description,'') || ' ' || coalesce(manufacturer,'') || ' ' || " +
+      "coalesce(footprint,'') || ' ' || coalesce(case_number,'') || ' ' || " +
+      "coalesce((SELECT l.name FROM locations l WHERE l.id=parts.location_id),'') || ' ' || " +
+      "coalesce(memo,'') || ' ' || " +
+      "coalesce((SELECT c.name FROM categories c WHERE c.id=parts.category_id),'') || ' ' || " +
+      "coalesce((SELECT group_concat(t.name,' ') FROM part_tags pt " +
+      "JOIN tags t ON t.id=pt.tag_id WHERE pt.part_id=parts.id),'') || ' ' || " +
+      "coalesce((SELECT group_concat(pa.key || ' ' || coalesce(pa.label,'') || ' ' || " +
+      "pa.value || ' ' || coalesce(pa.unit,''),' ') FROM part_attributes pa " +
+      "WHERE pa.part_id=parts.id),'')" +
+      ") WHERE id IN (" + selection + ")",
+    ).bind(idsJson));
+    // A single transaction also covers category/typed-value remapping.
+    // SQL bind count stays constant even for hundreds of selected IDs.
+    await this.db.batch(statements);
   }
 
-  async updateStockWithMovement(partId: number, afterQuantity: number, movement: StockMovementInput): Promise<void> {
-    const [result] = await this.db.batch([
-      this.db.prepare("UPDATE parts SET stock_quantity = ?, updated_at = datetime('now') WHERE id = ?").bind(afterQuantity, partId),
-      this.movementStatement(partId, movement),
-    ]);
-    if (result.meta.changes === 0) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
+  // A D1 batch executes both statements within one transaction. The movement
+  // captures the current stock BEFORE an atomic SQL update, not a stale JS read.
+  async changeStockAtomically(partId: number, input: StockChangeInput): Promise<void> {
+    const isSet = input.type === "set" ? 1 : 0;
+    const delta = input.type === "out" || input.type === "use" || input.type === "dispose"
+      ? -Math.abs(input.quantity) : input.quantity;
+    try {
+      const [, updated] = await this.db.batch([
+        this.db.prepare(
+          "INSERT INTO stock_movements (part_id, movement_type, quantity_before, quantity_delta, quantity_after, reason, memo) " +
+          "SELECT id, ?, stock_quantity, CASE WHEN ? = 1 THEN ? - stock_quantity ELSE ? END, " +
+          "CASE WHEN ? = 1 THEN ? ELSE stock_quantity + ? END, ?, ? FROM parts WHERE id = ?",
+        ).bind(input.type, isSet, input.quantity, delta, isSet, input.quantity, delta,
+          input.reason ?? null, input.memo ?? null, partId),
+        this.db.prepare(
+          "UPDATE parts SET stock_quantity = CASE WHEN ? = 1 THEN ? ELSE stock_quantity + ? END, " +
+          "updated_at = datetime('now') WHERE id = ?",
+        ).bind(isSet, input.quantity, delta, partId),
+      ]);
+      if (updated.meta.changes === 0) throw new AppError("PART_NOT_FOUND", "Part not found.", 404);
+    } catch (error) {
+      if (/CHECK constraint failed|constraint failed.*stock_quantity/i.test(String(error))) {
+        throw new AppError("NEGATIVE_STOCK", "Stock quantity cannot be negative.", 400);
+      }
+      throw error;
+    }
   }
 
   async listMovements(partId: number): Promise<StockMovement[]> {
@@ -662,23 +703,60 @@ export class PartsRepository {
     await this.rebuildSearchTextForRows(results);
   }
 
+
   async rebuildSearchTextForParts(partIds: number[]): Promise<void> {
-    const ids = [...new Set(partIds)].filter(Boolean);
-    if (ids.length === 0) return;
-    const placeholders = ids.map(() => "?").join(", ");
-    const { results } = await this.db
-      .prepare(
-        `SELECT p.*, c.name AS category_name, c.slug AS category_slug, l.name AS location_name, l.code AS location_code,
-                s.name AS status_name, s.slug AS status_slug, s.color AS status_color
-         FROM parts p
-         JOIN categories c ON c.id = p.category_id
-         LEFT JOIN locations l ON l.id = p.location_id
-         LEFT JOIN part_statuses s ON s.id = p.status_id
-         WHERE p.id IN (${placeholders})`,
-      )
-      .bind(...ids)
-      .all<DbPartRow>();
-    await this.rebuildSearchTextForRows(results);
+    const ids = [...new Set(partIds)].filter((id) => Number.isSafeInteger(id) && id > 0);
+    for (let start = 0; start < ids.length; start += 80) {
+      const chunk = ids.slice(start, start + 80);
+      const marks = chunk.map(() => "?").join(", ");
+      const { results } = await this.db.prepare(
+        "SELECT p.*, c.name AS category_name, c.slug AS category_slug, l.name AS location_name, l.code AS location_code, " +
+        "s.name AS status_name, s.slug AS status_slug, s.color AS status_color " +
+        "FROM parts p JOIN categories c ON c.id = p.category_id " +
+        "LEFT JOIN locations l ON l.id = p.location_id LEFT JOIN part_statuses s ON s.id = p.status_id " +
+        "WHERE p.id IN (" + marks + ")",
+      ).bind(...chunk).all<DbPartRow>();
+      await this.rebuildSearchTextForRows(results);
+    }
+  }
+
+  private async hydrateParts(rows: DbPartRow[]): Promise<PartSummary[]> {
+    const parts: PartSummary[] = [];
+    for (let offset = 0; offset < rows.length; offset += 80) {
+      const group = rows.slice(offset, offset + 80);
+      const ids = group.map((r) => r.id);
+      const marks = ids.map(() => "?").join(", ");
+      const [attributesResult, tagsResult, valuesResult] = await Promise.all([
+        this.db.prepare("SELECT * FROM part_attributes WHERE part_id IN (" + marks + ") ORDER BY id")
+          .bind(...ids).all<DbPartAttributeRow>(),
+        this.db.prepare("SELECT pt.part_id AS bound_part_id, t.* FROM tags t JOIN part_tags pt ON pt.tag_id = t.id WHERE pt.part_id IN (" + marks + ") ORDER BY t.name COLLATE NOCASE")
+          .bind(...ids).all<DbTagRow & { bound_part_id: number }>(),
+        this.db.prepare("SELECT pav.*, ad.key, ad.label FROM part_attribute_values pav JOIN attribute_definitions ad ON ad.id = pav.attribute_definition_id WHERE pav.part_id IN (" + marks + ") ORDER BY ad.sort_order")
+          .bind(...ids).all<DbPartAttributeValueRow>(),
+      ]);
+      const attributes = new Map<number, PartAttribute[]>();
+      const tags = new Map<number, Tag[]>();
+      const values = new Map<number, PartAttributeValue[]>();
+      for (const row of attributesResult.results) {
+        const group = attributes.get(row.part_id) ?? [];
+        group.push(mapAttribute(row));
+        attributes.set(row.part_id, group);
+      }
+      for (const row of tagsResult.results) {
+        const group = tags.get(row.bound_part_id) ?? [];
+        group.push(mapTag(row));
+        tags.set(row.bound_part_id, group);
+      }
+      for (const row of valuesResult.results) {
+        const group = values.get(row.part_id) ?? [];
+        group.push(mapPartAttributeValue(row));
+        values.set(row.part_id, group);
+      }
+      for (const row of group) {
+        parts.push(mapPart(row, attributes.get(row.id) ?? [], tags.get(row.id) ?? [], values.get(row.id) ?? []));
+      }
+    }
+    return parts;
   }
 
   private async hydratePart(row: DbPartRow): Promise<PartSummary> {
@@ -827,8 +905,7 @@ export class PartsRepository {
   private async rebuildSearchTextForRows(rows: DbPartRow[]): Promise<void> {
     const statements: D1PreparedStatement[] = [];
 
-    for (const row of rows) {
-      const part = await this.hydratePart(row);
+    for (const part of await this.hydrateParts(rows)) {
       const searchText = toSearchText({
         modelNumber: part.modelNumber,
         name: part.name,

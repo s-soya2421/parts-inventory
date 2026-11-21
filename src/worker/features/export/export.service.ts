@@ -37,6 +37,6 @@ export class ExportService {
       acc[schema.sheetName] ??= [];
       acc[schema.sheetName].push(this.rowBuilder.build(part, schema));
       return acc;
-    }, {});
+    }, Object.create(null) as Record<string, ExportRow[]>);
   }
 }

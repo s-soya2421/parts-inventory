@@ -24,11 +24,12 @@ export function PartForm({ categories, tags, statuses, initialPart, onSubmit }: 
   const [categoryId, setCategoryId] = useState(initialPart?.categoryId ?? categories[0]?.id ?? 0);
   const [statusId, setStatusId] = useState<number | "">(initialPart?.statusId ?? "");
   const [modelNumber, setModelNumber] = useState(initialPart?.modelNumber ?? "");
+  const [name, setName] = useState(initialPart?.name ?? "");
   const [description, setDescription] = useState(initialPart?.description ?? "");
   const [manufacturer, setManufacturer] = useState(initialPart?.manufacturer ?? "");
   const [footprint, setFootprint] = useState(initialPart?.footprint ?? "");
   const [stockQuantity, setStockQuantity] = useState(String(initialPart?.stockQuantity ?? 0));
-  const [price, setPrice] = useState(String(initialPart?.price ?? 0));
+  const [price, setPrice] = useState(initialPart?.price == null ? "" : String(initialPart.price));
   const [locationName, setLocationName] = useState(initialPart?.locationName ?? "");
   const [caseNumber, setCaseNumber] = useState(initialPart?.caseNumber ?? "");
   const [purchaseUrl, setPurchaseUrl] = useState(initialPart?.purchaseUrl ?? "");
@@ -51,12 +52,14 @@ export function PartForm({ categories, tags, statuses, initialPart, onSubmit }: 
 
   // Fetch attribute definitions when category changes
   useEffect(() => {
+    let active = true;
     if (!categoryId) {
       setAttrDefs([]);
       setDefinedValues({});
-      return;
+      return () => { active = false; };
     }
     apiClient.listCategoryAttributes(categoryId).then((defs) => {
+      if (!active) return;
       setAttrDefs(defs);
       // Initialize defined values from existing part attributes (for edit mode)
       const existingAttrs = initialPart?.attributes ?? [];
@@ -70,8 +73,9 @@ export function PartForm({ categories, tags, statuses, initialPart, onSubmit }: 
       }
       setDefinedValues(initial);
     }).catch(() => {
-      setAttrDefs([]);
+      if (active) setAttrDefs([]);
     });
+    return () => { active = false; };
   }, [categoryId, initialPart]);
 
   async function handleSubmit(event: React.FormEvent) {
@@ -95,12 +99,12 @@ export function PartForm({ categories, tags, statuses, initialPart, onSubmit }: 
       await onSubmit({
         categoryId,
         modelNumber,
-        name: modelNumber,
+        name: name.trim() || modelNumber.trim(),
         description,
         manufacturer,
         footprint,
         stockQuantity: numericValue(stockQuantity),
-        price: numericValue(price),
+        price: price.trim() === "" ? null : numericValue(price),
         locationName,
         caseNumber,
         purchaseUrl,
@@ -144,6 +148,9 @@ export function PartForm({ categories, tags, statuses, initialPart, onSubmit }: 
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="型番">
             <input className={inputClass} value={modelNumber} onChange={(event) => setModelNumber(event.target.value)} required />
+          </Field>
+          <Field label="部品名">
+            <input className={inputClass} value={name} onChange={(event) => setName(event.target.value)} placeholder="例：抵抗 10kΩ" />
           </Field>
           <Field label="ステータス">
             <select className={inputClass} value={statusId} onChange={(event) => setStatusId(event.target.value ? Number(event.target.value) : "")}>

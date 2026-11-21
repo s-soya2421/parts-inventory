@@ -15,7 +15,7 @@ pnpm install
 cp .dev.vars.example .dev.vars
 ```
 
-`BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` は画面とAPI全体を保護するBasic認証用。ローカル開発ではVite proxyが `.dev.vars` の値を使ってWorkerへ認証ヘッダーを付与する。未設定または空の場合、APIは `BASIC_AUTH_NOT_CONFIGURED` を返す。Cloudflare宛のsecret値は空にしないでください。
+`BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` は画面とAPI全体を保護するBasic認証用。Vite proxyは認証情報を自動付与しないため、Vite経由では先に `http://localhost:5173/api/health` を開き、ブラウザのBasic認証でログインする。未設定または空の場合は `BASIC_AUTH_NOT_CONFIGURED` を返す。Cloudflare宛のsecret値は空にしないでください。
 
 ## D1 Creation
 
@@ -90,10 +90,22 @@ pnpm build
 pnpm db:migrate:remote
 pnpm wrangler secret put BASIC_AUTH_USER
 pnpm wrangler secret put BASIC_AUTH_PASSWORD
+pnpm wrangler secret put GITHUB_TOKEN
+pnpm wrangler secret put GITHUB_REPOSITORY
+pnpm wrangler secret put GITHUB_ISSUE_ASSIGNEE
 pnpm wrangler deploy
 ```
 
 `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` はsecretとして登録し、リポジトリには保存しない。
+
+不具合報告をGitHub Issueとして作成する場合も、以下をCloudflare Secretとして設定する。
+
+- `GITHUB_TOKEN`: 対象リポジトリに限定したfine-grained token（Issues: Read and write）
+- `GITHUB_REPOSITORY`: `owner/repository` 形式
+- `GITHUB_ISSUE_ASSIGNEE`: Issueの担当者にするGitHubユーザー名
+
+トークン未設定でも報告内容はD1へ保存される。GitHubの通知設定で担当Issueのメール通知を有効にすると、別のメール送信サービスは不要。
+不具合報告は同一接続元から1分に2件までに制限し、制限用に保持する接続元キーはSHA-256ハッシュ化して1時間後に削除する。報告内容にパスワード、APIキー、個人情報を含めないよう、画面上でも案内する。
 
 CIなどで環境変数が注入されていることを事前確認する場合は、以下を実行する。
 
@@ -114,5 +126,40 @@ Basic認証なしでは `401` になり、正しいBasic認証付きで `GET` �
 ## Operational Notes
 
 - 画面と閲覧APIはBasic認証で保護する。本格ログインは未実装。
-- D1のバックアップ用途として `GET /api/export/parts?format=json&mode=raw` を使う。
+- `GET /api/export/parts?format=json&mode=raw` は部品データのエクスポートであり、D1の完全なバックアップではない。完全復旧は `docs/disaster-recovery.md` を参照する。
 - PDFの日本語フォント埋め込みは未対応。日本語を含む外部提出用帳票では出力確認を行う。
+
+## Logout and Security Checks
+
+- `assets.run_worker_first = true` を維持する。静的ファイル・SPAの画面遷移もWorkerの認証処理を通すために必須。
+- ヘッダーとスマホメニューのログアウトは、認証画面で「キャンセル」を選ぶ案内を表示してから `POST /api/logout` をフォーム送信する。通常ログインと同じrealmの `401 WWW-Authenticate` を返し、認証キャッシュの無効化を促す。正しいID・パスワードを再入力しても401になるため、再入力せずキャンセルする。401のHTMLが読み込まれた後、meta refreshで固定の `/` へ戻る。トップでも認証が必要なので再度ダイアログが出ることがある。
+- Chromeが認証キャンセル後に再送した `POST /api/logout` に認証情報がなくても、認証middlewareが同じ401の案内HTMLを返す。`/api/logout` に `Authentication required.` だけが表示される旧動作を防ぐ。通常の画面・APIは引き続き認証が必要で、GETの直接アクセスではログアウトしない。
+- Basic認証キャッシュをJavaScriptから直接削除するAPIはない。401後のキャッシュ無効化・認証画面のキャンセル・HTMLの読み込みはブラウザに依存する。Linux上のPlaywright WebKitはSafari実機ではないため、公開後は対象Safariでも下記手順を確認する。旧方式の `Clear-Site-Data: "cookies"` と303だけではSafariでログアウトしないとの実機報告があり、この方式へ置き換えた。
+- Cookie・localStorage/sessionStorage・保存済みテーマ・列順・インポート設定は保持する。`Clear-Site-Data` と `Set-Cookie` を送らず、DBへもアクセスしない。サーバーのID・パスワードとパスワードマネージャーの保存内容は変更しない。別タブに表示済みの画面を自動的に隠す機能は含まない。
+- 認証済みレスポンス、エクスポート、認証エラーは `Cache-Control: no-store`。HTMLにはCSP・クリックジャッキング対策・`nosniff` を付与する。外部画像はHTTPSのみ許可する。
+- 更新APIでは別originの `Origin`、`Sec-Fetch-Site: cross-site/same-site` を拒否する。ボディ付きAPIはJSONを要求し、1,000,000 bytesまでに制限する（logoutの同originフォームは例外）。ヘッダーなしの認証済みCLIリクエストは利用可能。
+- 本番ホストで未認証の `/`、`/parts`、`/assets/...`、`/api/health` がすべて401になることを確認する。本番に対する確認は読取リクエストだけにする。
+- `pnpm audit` は開発依存も含める。`pnpm audit --prod` も確認する。残る開発依存の問題は `docs/security-review-20261010.md` に記録する。
+- SheetJSは公式CDNの固定バージョンを使用する。`pnpm-lock.yaml` のintegrityを維持し、`pnpm install --frozen-lockfile` で再現する。脆弱なnpm版 `xlsx 0.18.5` に戻さない。
+
+### Chrome・Safariでのログアウト確認
+
+1. ログインし、在庫一覧を再読み込みして表示できることを確認する。
+2. ログアウトボタンを押し、最初の案内では「OK」を選ぶ。
+3. 続くブラウザの認証画面ではID・パスワードを入力せず「キャンセル」を選ぶ。トップでも認証画面が出たら同じくキャンセルする。
+4. トップの再読み込みと `/api/health` へのアクセスで認証が必要になることを確認する。認証なしで一覧やAPI結果が出る場合は、キャッシュが残っているため成功扱いにしない。
+5. 再ログイン後、在庫データと保存済み設定が保持されていることを確認する。
+
+HTTP 401はこのログアウト処理の意図した応答。HTTP 401が返ったことだけではキャッシュ消去成功とは判断しない。確認するのは、その後の通信で以前の認証情報が自動送信されないこと。OSとChrome・Safariのバージョンも記録する。Windows Chromeでは、キャンセル後に認証情報なしのログアウトPOSTがあっても `/` へ戻ることを確認する。
+
+## v0.2.1 Upgrade Safety (proposed; do not auto-deploy)
+
+PR #7 adds two additive migrations: `0011_atomic_create_tokens.sql` and `0012_import_after_snapshots.sql`. Before any approved deployment, verify a D1 Time Travel recovery bookmark, apply migrations **before** the new Worker, and inspect recent import/stock/CSV/API flows. Do not run remote migrations or restores automatically. Import batches predating post-import snapshots reject automatic revert with HTTP 409 rather than overwrite later edits.
+
+## PR②: Backup / Restore and Additional Migration Safety
+
+- Detailed recovery runbook: `docs/disaster-recovery.md`.
+- The disposable D1 round-trip job verifies a **local** SQL backup and restore only. It is **not** a successful remote Cloudflare restore test, and it does not guarantee zero downtime.
+- In addition to the v0.2.1 migrations listed above, this PR adds `0013_atomic_import_revert_guard.sql`. Review the applicable migration order and validate against a staging D1 before any approved production deployment.
+- Create and verify a Cloudflare D1 Time Travel recovery point before migration. Run remote migrations **before** deploying the matching Worker code, within a separately approved release procedure.
+- **Do not** export or restore the live D1 as part of normal deployment. Remote export can block database requests, and Time Travel restore can cancel in-flight queries.

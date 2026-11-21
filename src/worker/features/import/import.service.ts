@@ -47,6 +47,9 @@ export class ImportService {
 
     for (const [index, row] of rows.entries()) {
       try {
+        // Parse untrusted row data before creating any master records.
+        const parsedTags = this.parseTags(row.tags);
+        const parsedAttributes = this.parseAttributes(row.attributes_json);
         const category = await this.ensureCategory(row.category);
         const existing = await this.partsRepository.findByModelNumberAndCategory(category.id, row.model_number);
         const rowMode = row.mode ?? mode;
@@ -55,15 +58,15 @@ export class ImportService {
           categoryId: category.id,
           modelNumber: row.model_number,
           name: row.name,
-          stockQuantity: row.stock_quantity,
+          stockQuantity: row.stock_quantity ?? 0,
           price: row.price ?? null,
           footprint: row.footprint ?? null,
           manufacturer: row.manufacturer ?? null,
           caseNumber: row.case_number ?? null,
           memo: row.memo ?? null,
-          lowStockThreshold: row.low_stock_threshold,
-          tagNames: this.parseTags(row.tags),
-          attributes: this.parseAttributes(row.attributes_json),
+          lowStockThreshold: row.low_stock_threshold ?? 0,
+          tagNames: parsedTags,
+          attributes: parsedAttributes,
           tagIds: [],
           alternatives: [],
         };
@@ -73,14 +76,37 @@ export class ImportService {
             skipped += 1;
             continue;
           }
-          // 更新前の状態をスナップショットして取り消し可能にする
+          // Update only fields supplied by the import. Never clear unrelated
+          // URLs, locations, status, alternatives, tags, or attributes.
           const before = await this.partsService.getDetail(existing.id);
-          await this.partsService.update(existing.id, payload);
-          entries.push({ partId: existing.id, action: "update", beforeJson: JSON.stringify(toWriteInput(before)) });
+          const previous = toWriteInput(before);
+          await this.partsService.update(existing.id, {
+            ...previous,
+            ...payload,
+            stockQuantity: row.stock_quantity ?? previous.stockQuantity,
+            lowStockThreshold: row.low_stock_threshold ?? previous.lowStockThreshold,
+            price: row.price === undefined ? previous.price : row.price,
+            caseNumber: row.case_number === undefined ? previous.caseNumber : row.case_number,
+            footprint: row.footprint === undefined ? previous.footprint : row.footprint,
+            manufacturer: row.manufacturer === undefined ? previous.manufacturer : row.manufacturer,
+            memo: row.memo === undefined ? previous.memo : row.memo,
+            attributes: row.attributes_json === undefined ? previous.attributes : payload.attributes,
+            tagNames: row.tags === undefined ? previous.tagNames : payload.tagNames,
+            tagIds: row.tags === undefined ? previous.tagIds : [],
+            alternatives: previous.alternatives,
+          });
+          const after = await this.partsService.getDetail(existing.id);
+          entries.push({
+            partId: existing.id, action: "update",
+            beforeJson: JSON.stringify(previous), afterJson: JSON.stringify(toWriteInput(after)),
+          });
           updated += 1;
         } else {
           const detail = await this.partsService.create(payload);
-          entries.push({ partId: detail.id, action: "create", beforeJson: null });
+          entries.push({
+            partId: detail.id, action: "create", beforeJson: null,
+            afterJson: JSON.stringify(toWriteInput(detail)),
+          });
           created += 1;
         }
       } catch (error) {
@@ -118,40 +144,38 @@ export class ImportService {
       );
     }
 
-    let deleted = 0;
-    let restored = 0;
-    let failed = 0;
 
+    // Revert entries in a SINGLE SQLite/D1 transaction, not one part at a time.
+    // Legacy snapshots and repeated part IDs cannot safely be auto-reverted.
+    if (found.entries.some((entry) => !entry.after_json)) {
+      throw new AppError("IMPORT_REVERT_UNVERIFIED", "Legacy import lacks verified snapshots.", 409);
+    }
+    const ids = new Set<number>();
     for (const entry of found.entries) {
-      try {
-        if (entry.action === "create") {
-          await this.partsService.delete(entry.part_id);
-          deleted += 1;
-        } else if (entry.before_json) {
-          const before = JSON.parse(entry.before_json) as PartWriteInput;
-          await this.partsService.update(entry.part_id, before);
-          restored += 1;
-        }
-      } catch {
-        failed += 1;
+      if (ids.has(entry.part_id)) {
+        throw new AppError(
+          "IMPORT_REVERT_DUPLICATE",
+          "The same part was imported more than once in this batch; automatic undo is unsafe.",
+          409,
+        );
       }
+      ids.add(entry.part_id);
     }
 
-    if (failed > 0) {
-      throw new AppError(
-        "IMPORT_REVERT_PARTIAL_FAILURE",
-        "Import revert failed for one or more entries. The batch was not marked as reverted.",
-        409,
-      );
-    }
-
-    await this.batchesRepository.markReverted(id);
-    return { deleted, restored, failed };
+    await this.batchesRepository.revertAtomically(id);
+    return {
+      deleted: found.entries.filter((entry) => entry.action === "create").length,
+      restored: found.entries.filter((entry) => entry.action === "update").length,
+      failed: 0,
+    };
   }
+
 
   private async ensureCategory(name: string) {
     const slug = slugify(name);
-    return (await this.categoriesRepository.findBySlug(slug)) ?? this.categoriesRepository.create({ name, slug });
+    return (await this.categoriesRepository.findByName(name)) ??
+      (await this.categoriesRepository.findBySlug(slug)) ??
+      this.categoriesRepository.create({ name, slug });
   }
 
   private parseTags(value: ImportPartRow["tags"]): string[] {
@@ -197,6 +221,7 @@ function toWriteInput(part: PartDetail): PartWriteInput {
     datasheetUrl: part.datasheetUrl ?? null,
     memo: part.memo ?? null,
     lowStockThreshold: part.lowStockThreshold,
+    statusId: part.statusId ?? null,
     attributes: part.attributes.map((a) => ({
       key: a.key,
       label: a.label ?? null,

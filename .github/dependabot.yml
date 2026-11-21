@@ -1,0 +1,48 @@
+# Dependabot proposes updates; merging/deploying remains a reviewed action.
+# PRs run the existing CI, security regression, Chromium E2E and local-D1 restore gates.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 6
+    groups:
+      production-patches:
+        dependency-type: "production"
+        update-types: ["patch"]
+      development-safe-updates:
+        dependency-type: "development"
+        update-types: ["patch", "minor"]
+    # This is a pinned vendor tarball, not an npm registry version.
+    # Update its URL/integrity explicitly after reviewing the upstream release.
+    ignore:
+      - dependency-name: "xlsx"
+
+  - package-ecosystem: "npm"
+    directory: "/e2e"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:30"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
+    groups:
+      browser-test-tooling:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
+    groups:
+      actions-patches-and-minors:
+        patterns: ["*"]
+        update-types: ["patch", "minor"]

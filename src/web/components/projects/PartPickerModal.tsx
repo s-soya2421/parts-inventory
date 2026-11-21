@@ -30,6 +30,7 @@ export function PartPickerModal({
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let active = true;
     const timer = window.setTimeout(async () => {
       setIsLoading(true);
       setError("");
@@ -42,6 +43,7 @@ export function PartPickerModal({
         });
         if (query.trim()) search.set("q", query.trim());
         const response = await apiClient.listParts(search);
+        if (!active) return;
         setResults(response.items);
         setFocusedId((current) =>
           response.items.some((part) => part.id === current)
@@ -49,15 +51,13 @@ export function PartPickerModal({
             : (response.items[0]?.id ?? null),
         );
       } catch (cause) {
-        setError(
-          cause instanceof Error ? cause.message : "部品の検索に失敗しました。",
-        );
+        if (active) setError(cause instanceof Error ? cause.message : "部品の検索に失敗しました。");
       } finally {
-        setIsLoading(false);
+        if (active) setIsLoading(false);
       }
     }, 250);
 
-    return () => window.clearTimeout(timer);
+    return () => { active = false; window.clearTimeout(timer); };
   }, [query]);
 
   useEffect(() => {
