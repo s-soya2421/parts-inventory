@@ -19,10 +19,26 @@ describe("dependency advisory regression invariants", () => {
     expect(pkg.dependencies["@vitejs/plugin-react"]).toBeUndefined();
     expect(pkg.devDependencies["@vitejs/plugin-react"]).toBeTruthy();
   });
-  it("pins DOMPurify to a patched version throughout the dependency tree", () => {
-    expect(pkg.pnpm.overrides.dompurify).toBe("^3.4.18");
-    expect(lock).toContain("dompurify@3.4.18:");
-    expect(lock).not.toContain("dompurify@3.4.6:");
+  it("keeps DOMPurify at or above the patched version during automated updates", () => {
+    // SemVer floors are security invariants; exact pins would incorrectly block
+    // future patched Dependabot upgrades.
+    function parts(version: string): number[] {
+      const match = version.match(/^[~^]?(\d+)\.(\d+)\.(\d+)$/);
+      expect(match).not.toBeNull();
+      return match!.slice(1).map(Number);
+    }
+    function isAtLeast(version: string, minimum: string): boolean {
+      const left = parts(version);
+      const right = parts(minimum);
+      for (let index = 0; index < 3; index++) {
+        if (left[index] !== right[index]) return left[index] > right[index];
+      }
+      return true;
+    }
+    expect(isAtLeast(pkg.pnpm.overrides.dompurify, "3.4.18")).toBe(true);
+    const resolved = [...lock.matchAll(/^  dompurify@(\d+\.\d+\.\d+):$/gm)].map(match => match[1]);
+    expect(resolved.length).toBeGreaterThan(0);
+    expect(resolved.every(version => isAtLeast(version, "3.4.18"))).toBe(true);
   });
   it("tracks the data integrity patch version after the regression gate", () => {
     expect(pkg.version).toBe("0.2.1");
