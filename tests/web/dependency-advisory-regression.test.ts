@@ -36,7 +36,7 @@ describe("dependency advisory regression invariants", () => {
       return true;
     }
     expect(isAtLeast(pkg.pnpm.overrides.dompurify, "3.4.18")).toBe(true);
-    const resolved = [...lock.matchAll(/^  dompurify@(\d+\.\d+\.\d+):$/gm)].map(match => match[1]);
+    const resolved = [...lock.matchAll(/^\s{2}dompurify@(\d+\.\d+\.\d+):$/gm)].map(match => match[1]);
     expect(resolved.length).toBeGreaterThan(0);
     expect(resolved.every(version => isAtLeast(version, "3.4.18"))).toBe(true);
   });
